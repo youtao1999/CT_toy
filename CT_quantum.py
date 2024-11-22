@@ -433,7 +433,7 @@ class CT_quantum:
         else:
             raise NotImplementedError(f"Order parameter of {self.xj} is not implemented")
         if self.debug:
-            assert np.abs(O.imag)<self._eps, f'<O> is not real ({val}) '
+            assert np.abs(O.imag)<self._eps, f'<O> is not real ({O}) '
         return O.real
     
     def von_Neumann_entropy_pure(self,subregion,vec=None,n=1,threshold=1e-10):

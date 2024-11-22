@@ -1,0 +1,29 @@
+# First exclude everything
+*
+
+# Then include only what we want
+!*.py
+!*.ipynb
+!*.sh
+!.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Output files
+tmi_pctrl_results_L*/
+*.out
+*.err
+*.log
+
+# System files
+.DS_Store
