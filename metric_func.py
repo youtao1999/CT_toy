@@ -73,19 +73,19 @@ def von_Neumann_entropy_pure(vec, subregion, L_T, n=1, threshold=1e-10):
     vec_tensor_T = vec_tensor.transpose(np.hstack([subregion, not_subregion]))
     S = np.linalg.svd(vec_tensor_T.reshape((2**len(subregion), 2**len(not_subregion))), compute_uv=False)
     S_pos = np.clip(S, threshold, None)
-    S_pos2 = S_pos**2
+    eigenvalues = S_pos**2
 
     if n == 1:
-        entropy = -np.sum(np.log(S_pos2) * S_pos2)
+        entropy = -np.sum(np.log(eigenvalues) * eigenvalues)
         if np.isnan(entropy):
             entropy = 0
         return entropy
     elif n == 0:
-        return np.log((S_pos2 > threshold**2).sum())
+        return np.log((eigenvalues > threshold**2).sum())
     elif n == np.inf:
-        return -np.log(np.max(S_pos2))
+        return -np.log(np.max(eigenvalues))
     else:
-        return np.log(np.sum(S_pos2**n)) / (1-n)
+        return np.log(np.sum(eigenvalues**n)) / (1-n)
 
 def half_system_entanglement_entropy(vec, L, selfaverage=True, n=1, threshold=1e-10):
     """Calculate the half-system entanglement entropy for a given state vector.

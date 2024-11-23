@@ -32,12 +32,10 @@ def compute_tmi_single(L, p_ctrl_values, p_proj, chunk_size):
             qct_tao = qct.QCT(L, p_ctrl, p_proj)
             for _ in range(num_time_steps):
                 qct_tao.step_evolution()
-            samples.append(tripartite_mutual_information_tao(qct_tao.state, L))
+            samples.append(tripartite_mutual_information_tao(qct_tao.state, L, n=0))
         results['tmi_samples'].append(samples)
     
     return results
-
-
 
 def combine_results(output_dir, L, p_proj_values, total_samples=2000):
     """

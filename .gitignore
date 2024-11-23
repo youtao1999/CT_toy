@@ -6,6 +6,7 @@
 !*.ipynb
 !*.sh
 !.gitignore
+!*.md
 
 # Python
 __pycache__/
