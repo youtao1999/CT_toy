@@ -1,24 +1,15 @@
 import numpy as np
 
-def tripartite_mutual_information_tao(vec, L, n=1, threshold=1e-10):
+def tripartite_mutual_information_tao(vec, L, n=1, threshold=1e-10, return_singular_values=True):
     """
-    Compute the tripartite mutual information for a given state vector.
-
-    Parameters:
-    -----------
-    vec : np.array, shape=(2**L,) or (2,)*L
-        State vector
-    L : int
-        Total number of qubits (must be divisible by 4)
-    n : int, optional
-        n-th Renyi entropy, by default 1
-    threshold : float, optional
-        Threshold for singular values, by default 1e-10
-
+    Compute the tripartite mutual information and return singular values for each partition.
+    
     Returns:
     --------
-    float
-        Tripartite mutual information
+    If return_singular_values=False:
+        float: Tripartite mutual information
+    If return_singular_values=True:
+        tuple: (I_3, singular_values_dict) where singular_values_dict contains SVD values for each partition
     """
     if L % 4 != 0:
         raise ValueError("L must be divisible by 4")
@@ -30,48 +21,49 @@ def tripartite_mutual_information_tao(vec, L, n=1, threshold=1e-10):
     B = list(range(subregion_size, 2*subregion_size))
     C = list(range(2*subregion_size, 3*subregion_size))
 
-    # Compute entropies
-    S_A = von_Neumann_entropy_pure(vec, A, L, n, threshold)
-    S_B = von_Neumann_entropy_pure(vec, B, L, n, threshold)
-    S_C = von_Neumann_entropy_pure(vec, C, L, n, threshold)
+    # Modified entropy calculations to capture singular values
+    S_A, sv_A = von_Neumann_entropy_pure(vec, A, L, n, threshold, return_singular_values=True)
+    S_B, sv_B = von_Neumann_entropy_pure(vec, B, L, n, threshold, return_singular_values=True)
+    S_C, sv_C = von_Neumann_entropy_pure(vec, C, L, n, threshold, return_singular_values=True)
 
-    S_AB = von_Neumann_entropy_pure(vec, A + B, L, n, threshold)
-    S_AC = von_Neumann_entropy_pure(vec, A + C, L, n, threshold)
-    S_BC = von_Neumann_entropy_pure(vec, B + C, L, n, threshold)
+    S_AB, sv_AB = von_Neumann_entropy_pure(vec, A + B, L, n, threshold, return_singular_values=True)
+    S_AC, sv_AC = von_Neumann_entropy_pure(vec, A + C, L, n, threshold, return_singular_values=True)
+    S_BC, sv_BC = von_Neumann_entropy_pure(vec, B + C, L, n, threshold, return_singular_values=True)
 
-    S_ABC = von_Neumann_entropy_pure(vec, A + B + C, L, n, threshold)
+    S_ABC, sv_ABC = von_Neumann_entropy_pure(vec, A + B + C, L, n, threshold, return_singular_values=True)
 
     # Compute tripartite mutual information
     I_3 = S_A + S_B + S_C - S_AB - S_AC - S_BC + S_ABC
 
+    if return_singular_values:
+        singular_values = {
+            'A': sv_A,
+            'B': sv_B,
+            'C': sv_C,
+            'AB': sv_AB,
+            'AC': sv_AC,
+            'BC': sv_BC,
+            'ABC': sv_ABC
+        }
+        return I_3, singular_values
     return I_3
 
-def von_Neumann_entropy_pure(vec, subregion, L_T, n=1, threshold=1e-10):
-    """Calculate the von Neumann entropy of a pure state for a given subregion.
-
-    Parameters
-    ----------
-    vec : np.array, shape=(2**L_T,) or (2,)*L_T
-        State vector
-    subregion : list of int or np.array
-        The spatial subregion to calculate the von Neumann entropy
-    L_T : int
-        Total number of qubits
-    n : int, optional
-        n-th Renyi entropy, by default 1
-    threshold : float, optional
-        Threshold to clip the singular value, by default 1e-10
-
-    Returns
-    -------
-    float
-        Von Neumann entropy of the subregion
+def von_Neumann_entropy_pure(vec, subregion, L_T, n=1, threshold=1e-10, return_singular_values=False):
+    """
+    Modified to compute SVD on smaller subsystem when possible.
     """
     vec_tensor = vec.reshape((2,) * L_T)
     subregion = list(subregion)
     not_subregion = [i for i in range(L_T) if i not in subregion]
-    vec_tensor_T = vec_tensor.transpose(np.hstack([subregion, not_subregion]))
-    S = np.linalg.svd(vec_tensor_T.reshape((2**len(subregion), 2**len(not_subregion))), compute_uv=False)
+    
+    # Choose smaller subsystem for SVD calculation
+    if len(subregion) > len(not_subregion):
+        vec_tensor_T = vec_tensor.transpose(np.hstack([not_subregion, subregion]))
+        S = np.linalg.svd(vec_tensor_T.reshape((2**len(not_subregion), 2**len(subregion))), compute_uv=False)
+    else:
+        vec_tensor_T = vec_tensor.transpose(np.hstack([subregion, not_subregion]))
+        S = np.linalg.svd(vec_tensor_T.reshape((2**len(subregion), 2**len(not_subregion))), compute_uv=False)
+    
     S_pos = np.clip(S, threshold, None)
     eigenvalues = S_pos**2
 
@@ -79,13 +71,16 @@ def von_Neumann_entropy_pure(vec, subregion, L_T, n=1, threshold=1e-10):
         entropy = -np.sum(np.log(eigenvalues) * eigenvalues)
         if np.isnan(entropy):
             entropy = 0
-        return entropy
     elif n == 0:
-        return np.log((eigenvalues > threshold**2).sum())
+        entropy = np.log((eigenvalues > threshold**2).sum())
     elif n == np.inf:
-        return -np.log(np.max(eigenvalues))
+        entropy = -np.log(np.max(eigenvalues))
     else:
-        return np.log(np.sum(eigenvalues**n)) / (1-n)
+        entropy = np.log(np.sum(eigenvalues**n)) / (1-n)
+
+    if return_singular_values:
+        return entropy, S_pos
+    return entropy
 
 def half_system_entanglement_entropy(vec, L, selfaverage=True, n=1, threshold=1e-10):
     """Calculate the half-system entanglement entropy for a given state vector.

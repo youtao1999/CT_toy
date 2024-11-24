@@ -5,101 +5,104 @@ import argparse
 import os
 import json
 from metric_func import tripartite_mutual_information_tao
+import h5py
 
 def compute_tmi_single(L, p_ctrl_values, p_proj, chunk_size):
     """
-    Compute TMI for a single L value with a small chunk of samples
-    
-    Args:
-        L: System size
-        p_ctrl_values: Array of p_ctrl values to compute
-        p_proj: Single p_proj value
-        chunk_size: Number of samples in this chunk (small, e.g., 20)
+    Compute and store singular values for a single L value with a small chunk of samples
     """
     num_time_steps = L**2*2
-    results = {
-        'L': L,
-        'p_proj': p_proj,
-        'p_ctrl': p_ctrl_values.tolist(),
-        'tmi_samples': [],  # Store all samples for each p_ctrl
-        'chunk_size': chunk_size
-    }
     
     # For each p_ctrl, collect chunk_size samples
+    samples = []
     for p_ctrl in p_ctrl_values:
-        samples = []
+        chunk_samples = []
         for _ in range(chunk_size):
             qct_tao = qct.QCT(L, p_ctrl, p_proj)
             for _ in range(num_time_steps):
                 qct_tao.step_evolution()
-            samples.append(tripartite_mutual_information_tao(qct_tao.state, L, n=0))
-        results['tmi_samples'].append(samples)
+            _, singular_values = tripartite_mutual_information_tao(qct_tao.state, L, n=0, return_singular_values=True)
+            chunk_samples.append(singular_values)
+        samples.append(chunk_samples)
     
-    return results
+    # Convert to numpy arrays for efficient storage
+    singular_values_dict = {
+        'A': np.array([[s['A'] for s in chunk] for chunk in samples]),
+        'B': np.array([[s['B'] for s in chunk] for chunk in samples]),
+        'C': np.array([[s['C'] for s in chunk] for chunk in samples]),
+        'AB': np.array([[s['AB'] for s in chunk] for chunk in samples]),
+        'AC': np.array([[s['AC'] for s in chunk] for chunk in samples]),
+        'BC': np.array([[s['BC'] for s in chunk] for chunk in samples]),
+        'ABC': np.array([[s['ABC'] for s in chunk] for chunk in samples])
+    }
+    
+    return {
+        'L': L,
+        'p_proj': p_proj,
+        'p_ctrl': p_ctrl_values,
+        'singular_values': singular_values_dict,
+        'chunk_size': chunk_size
+    }
+
+def save_chunk(result, output_dir, rank, chunk_idx):
+    """Save chunk results to HDF5 file"""
+    chunk_file = f'chunk_pproj{result["p_proj"]:.3f}_rank{rank}_chunk{chunk_idx}.h5'
+    chunk_path = os.path.join(output_dir, chunk_file)
+    
+    with h5py.File(chunk_path, 'w') as f:
+        # Store metadata
+        f.attrs['L'] = result['L']
+        f.attrs['p_proj'] = result['p_proj']
+        f.attrs['chunk_size'] = result['chunk_size']
+        f.create_dataset('p_ctrl', data=result['p_ctrl'])
+        
+        # Create group for singular values
+        sv_group = f.create_group('singular_values')
+        for key, value in result['singular_values'].items():
+            sv_group.create_dataset(key, data=value)
 
 def combine_results(output_dir, L, p_proj_values, total_samples=2000):
-    """
-    Combine chunks for proper ensemble averaging
+    """Combine chunks into a single HDF5 file"""
+    final_file = os.path.join(output_dir, f'final_results_L{L}.h5')
     
-    Args:
-        output_dir: Directory containing chunk files
-        L: System size
-        p_proj_values: Array of p_proj values
-        total_samples: Target total number of samples (e.g., 2000)
-    """
-    final_results = {}
-    
-    for p_proj in p_proj_values:
-        key = f'pproj{p_proj:.3f}'
-        final_results[key] = {
-            'tmi': None,
-            'tmi_std': None,
-            'total_samples': 0
-        }
+    with h5py.File(final_file, 'w') as f:
+        f.attrs['L'] = L
         
-        # Find all chunks for this p_proj
-        chunk_files = [f for f in os.listdir(output_dir) 
-                      if f.startswith(f'chunk_pproj{p_proj:.3f}_rank')]
-        
-        if not chunk_files:
-            print(f"Warning: No chunks found for p_proj={p_proj}")
-            continue
-        
-        # Read all samples from all chunks
-        all_samples = []  # List of lists: [p_ctrl][sample]
-        
-        # Initialize with first chunk to get dimensions
-        with open(os.path.join(output_dir, chunk_files[0]), 'r') as f:
-            first_chunk = json.load(f)
-            num_p_ctrl = len(first_chunk['tmi_samples'])
-            all_samples = [[] for _ in range(num_p_ctrl)]
-        
-        # Collect all samples
-        for chunk_file in chunk_files:
-            with open(os.path.join(output_dir, chunk_file), 'r') as f:
-                chunk_data = json.load(f)
-                for p_ctrl_idx in range(num_p_ctrl):
-                    all_samples[p_ctrl_idx].extend(chunk_data['tmi_samples'][p_ctrl_idx])
-        
-        # Compute ensemble averages and standard errors
-        tmi_means = []
-        tmi_stds = []
-        n_samples = len(all_samples[0])  # Number of samples per p_ctrl
-        
-        for p_ctrl_samples in all_samples:
-            tmi_means.append(np.mean(p_ctrl_samples))
-            tmi_stds.append(np.std(p_ctrl_samples) / np.sqrt(n_samples))
-        
-        final_results[key]['tmi'] = tmi_means
-        final_results[key]['tmi_std'] = tmi_stds
-        final_results[key]['total_samples'] = n_samples
-        
-        print(f"Combined {n_samples} samples for p_proj={p_proj}")
-        
-        if n_samples < total_samples:
-            print(f"Warning: Only got {n_samples} samples out of {total_samples} targeted")
-    
-    return final_results
+        for p_proj in p_proj_values:
+            # Find all chunks for this p_proj
+            chunk_files = [f for f in os.listdir(output_dir) 
+                         if f.startswith(f'chunk_pproj{p_proj:.3f}_rank') and f.endswith('.h5')]
+            
+            if not chunk_files:
+                print(f"Warning: No chunks found for p_proj={p_proj}")
+                continue
+            
+            # Create group for this p_proj
+            p_proj_group = f.create_group(f'pproj{p_proj:.3f}')
+            
+            # Read first chunk to get structure
+            with h5py.File(os.path.join(output_dir, chunk_files[0]), 'r') as chunk_f:
+                p_ctrl_values = chunk_f['p_ctrl'][:]
+                p_proj_group.create_dataset('p_ctrl', data=p_ctrl_values)
+            
+            # Initialize arrays for combined data
+            all_samples = {
+                key: [] for key in ['A', 'B', 'C', 'AB', 'AC', 'BC', 'ABC']
+            }
+            
+            # Combine all chunks
+            for chunk_file in chunk_files:
+                with h5py.File(os.path.join(output_dir, chunk_file), 'r') as chunk_f:
+                    for key in all_samples:
+                        all_samples[key].append(chunk_f['singular_values'][key][:])
+            
+            # Store combined data
+            sv_group = p_proj_group.create_group('singular_values')
+            for key, value in all_samples.items():
+                combined_data = np.concatenate(value, axis=1)  # Combine along sample dimension
+                sv_group.create_dataset(key, data=combined_data)
+            
+            p_proj_group.attrs['total_samples'] = combined_data.shape[1]
 
 def main():
     parser = argparse.ArgumentParser(description='Compute TMI for a specific system size L')
@@ -144,27 +147,30 @@ def main():
     comm.Barrier()
 
     # Fixed parameters
-    # p_proj_values = np.linspace(0.5, 1.0, 15)
-    p_proj_values = [0.3]
-    p_ctrl_values = np.linspace(0, 0.6, 21)
-    chunks_needed = total_samples // chunk_size  # 20 chunks needed
+    p_proj_values = np.linspace(0.5, 1.0, 2)
+    p_ctrl_values = np.linspace(0, 0.6, 2)
 
     # Create all parameter combinations including chunk indices
     all_params = [(args.L, p_proj, chunk_idx) 
                  for p_proj in p_proj_values 
-                 for chunk_idx in range(chunks_needed)]
+                 for chunk_idx in range(args.ncpu)]
     
     # Distribute work across ranks
     for param_idx in range(rank, len(all_params), size):
         L, p_proj, chunk_idx = all_params[param_idx]
         
-        # Compute chunk
-        chunk_result = compute_tmi_single(L, p_ctrl_values, p_proj, chunk_size)
+        print(f"Rank {rank}: Starting calculation for L={L}, p_proj={p_proj}, chunk={chunk_idx}")
         
-        # Save chunk result with chunk index
-        chunk_file = f'chunk_pproj{p_proj:.3f}_rank{rank}_chunk{chunk_idx}.json'
-        with open(os.path.join(output_dir, chunk_file), 'w') as f:
-            json.dump(chunk_result, f)
+        try:
+            # Compute chunk
+            chunk_result = compute_tmi_single(L, p_ctrl_values, p_proj, chunk_size)
+            save_chunk(chunk_result, output_dir, rank, chunk_idx)
+            
+            print(f"Rank {rank}: Successfully wrote chunk {chunk_idx}")
+            
+        except Exception as e:
+            print(f"Rank {rank}: Error in chunk {chunk_idx}: {str(e)}")
+            raise  # Re-raise the exception to see the full traceback
 
     comm.Barrier()
 
