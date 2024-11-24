@@ -42,6 +42,7 @@ export SLURM_L=$L
 module purge
 module use /projects/community/modulefiles
 module load python/3.9.6-gc563
+module load hdf5/1.13.3-mpi-oneapi_2022-sw1088
 module load openmpi/2.1.1
 
 # Disable hyperthreading
