@@ -43,27 +43,51 @@ def read_tmi_results(L_values, n=0, threshold=1e-10):
     results = {}
     
     for L in L_values:
-        filename = f'tmi_pctrl_results_L{L}/final_results_L{L}.h5'
+        filename = f'tmi0_pctrl_results_L{L}/final_results_L{L}.h5'
         if not os.path.exists(filename):
             print(f"Warning: File {filename} not found!")
             continue
             
+        print(f"\nAnalyzing file: {filename}")
         with h5py.File(filename, 'r') as f:
+            # Print file attributes
+            print(f"File attributes: {dict(f.attrs)}")
+            
+            # Print structure of groups and datasets
+            print("\nFile structure:")
+            def print_structure(name, obj):
+                if isinstance(obj, h5py.Group):
+                    print(f"GROUP: {name}/")
+                elif isinstance(obj, h5py.Dataset):
+                    print(f"DATASET: {name}, shape: {obj.shape}, dtype: {obj.dtype}")
+            f.visititems(print_structure)
+            
             results[L] = {}
             
             for p_proj_key in f.keys():
+                print(f"\nProcessing p_proj group: {p_proj_key}")
                 p_proj_group = f[p_proj_key]
+                print(f"p_proj group attributes: {dict(p_proj_group.attrs)}")
+                
                 tmi_means = []
                 tmi_sems = []
                 
                 sv_group = p_proj_group['singular_values']
+                print("\nSingular value datasets:")
+                for key in sv_group.keys():
+                    print(f"{key}: shape {sv_group[key].shape}")
+                
                 num_p_ctrl = len(p_proj_group['p_ctrl'])
+                print(f"Number of p_ctrl values: {num_p_ctrl}")
+                print(f"p_ctrl values: {p_proj_group['p_ctrl'][:]}")
                 
                 for p_ctrl_idx in range(num_p_ctrl):
                     # Get singular values for all samples at this p_ctrl
+                    num_samples = sv_group[list(sv_group.keys())[0]].shape[1]  # Get number of samples
                     singular_values = [{
-                        key: sv_group[key][p_ctrl_idx, :] for key in sv_group.keys()
-                    }]
+                        key: sv_group[key][p_ctrl_idx, sample_idx] 
+                        for key in sv_group.keys()
+                    } for sample_idx in range(num_samples)]
                     
                     # Compute TMI for each sample
                     tmi_values = [compute_tmi_from_singular_values(sv, n, threshold) 
@@ -120,7 +144,7 @@ def plot_tmi_vs_pctrl(L_values, n=0, threshold=1e-10):
 if __name__ == "__main__":
     # Plot results for different Rényi indices
     L_values = [8, 12, 16]
-    n_values = [0, 1, 2, np.inf]
+    n_values = [0]
     threshold = 1e-10
     
     for n in n_values:
