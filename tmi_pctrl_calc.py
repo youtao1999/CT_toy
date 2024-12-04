@@ -190,3 +190,10 @@ class NumpyEncoder(json.JSONEncoder):
 
 if __name__ == "__main__":
     main()
+    # output_dir = f'tmi0_pctrl_results_L20'
+    # p_proj_values = np.linspace(0.5, 1.0, 15)[:14]
+    # final_results = combine_results(output_dir, 20, p_proj_values)
+
+    # # Save final results
+    # with open(os.path.join(output_dir, f'final_results_L20.json'), 'w') as f:
+    #     json.dump(final_results, f)

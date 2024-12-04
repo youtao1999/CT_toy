@@ -36,70 +36,108 @@ def compute_tmi_from_singular_values(singular_values, n=0, threshold=1e-10):
     
     return S_A + S_B + S_C - S_AB - S_AC - S_BC + S_ABC
 
-def read_tmi_results(L_values, n=0, threshold=1e-10):
+def read_tmi_results(L_values, n=0, threshold=1e-10, output_filename='tmi_results.csv'):
     """
-    Read singular values from HDF5 files and compute TMI statistics
+    Read singular values from HDF5 files and compute TMI statistics, then write results to a CSV file.
+    If the CSV file already exists, read results from it instead.
     """
+    import csv
+
+    # Check if the output file already exists
+    if os.path.exists(output_filename):
+        print(f"Output file {output_filename} already exists. Reading results from it.")
+        results = {}
+        with open(output_filename, mode='r') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                L = int(row['L'])
+                p_proj_key = row['p_proj']
+                p_ctrl_idx = int(row['p_ctrl_index'])
+                tmi_mean = float(row['tmi_mean'])
+                tmi_sem = float(row['tmi_sem'])
+                
+                if L not in results:
+                    results[L] = {}
+                if p_proj_key not in results[L]:
+                    results[L][p_proj_key] = {'tmi_mean': [], 'tmi_sem': []}
+                
+                results[L][p_proj_key]['tmi_mean'].append(tmi_mean)
+                results[L][p_proj_key]['tmi_sem'].append(tmi_sem)
+        
+        return results
+
     results = {}
     
-    for L in L_values:
-        filename = f'tmi0_pctrl_results_L{L}/final_results_L{L}.h5'
-        if not os.path.exists(filename):
-            print(f"Warning: File {filename} not found!")
-            continue
-            
-        print(f"\nAnalyzing file: {filename}")
-        with h5py.File(filename, 'r') as f:
-            # Print file attributes
-            print(f"File attributes: {dict(f.attrs)}")
-            
-            # Print structure of groups and datasets
-            print("\nFile structure:")
-            def print_structure(name, obj):
-                if isinstance(obj, h5py.Group):
-                    print(f"GROUP: {name}/")
-                elif isinstance(obj, h5py.Dataset):
-                    print(f"DATASET: {name}, shape: {obj.shape}, dtype: {obj.dtype}")
-            f.visititems(print_structure)
-            
-            results[L] = {}
-            
-            for p_proj_key in f.keys():
-                print(f"\nProcessing p_proj group: {p_proj_key}")
-                p_proj_group = f[p_proj_key]
-                print(f"p_proj group attributes: {dict(p_proj_group.attrs)}")
+    # Prepare to write to CSV
+    with open(output_filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        # Write header
+        writer.writerow(['L', 'p_proj', 'p_ctrl_index', 'tmi_mean', 'tmi_sem'])
+        
+        for L in L_values:
+            filename = f'tmi0_pctrl_results_L{L}/final_results_L{L}.h5'
+            if not os.path.exists(filename):
+                print(f"Warning: File {filename} not found!")
+                continue
                 
-                tmi_means = []
-                tmi_sems = []
+            print(f"\nAnalyzing file: {filename}")
+            with h5py.File(filename, 'r') as f:
+                # Print file attributes
+                print(f"File attributes: {dict(f.attrs)}")
                 
-                sv_group = p_proj_group['singular_values']
-                print("\nSingular value datasets:")
-                for key in sv_group.keys():
-                    print(f"{key}: shape {sv_group[key].shape}")
+                # Print structure of groups and datasets
+                print("\nFile structure:")
+                def print_structure(name, obj):
+                    if isinstance(obj, h5py.Group):
+                        print(f"GROUP: {name}/")
+                    elif isinstance(obj, h5py.Dataset):
+                        print(f"DATASET: {name}, shape: {obj.shape}, dtype: {obj.dtype}")
+                f.visititems(print_structure)
                 
-                num_p_ctrl = len(p_proj_group['p_ctrl'])
-                print(f"Number of p_ctrl values: {num_p_ctrl}")
-                print(f"p_ctrl values: {p_proj_group['p_ctrl'][:]}")
+                results[L] = {}
                 
-                for p_ctrl_idx in range(num_p_ctrl):
-                    # Get singular values for all samples at this p_ctrl
-                    num_samples = sv_group[list(sv_group.keys())[0]].shape[1]  # Get number of samples
-                    singular_values = [{
-                        key: sv_group[key][p_ctrl_idx, sample_idx] 
-                        for key in sv_group.keys()
-                    } for sample_idx in range(num_samples)]
+                for p_proj_key in f.keys():
+                    print(f"\nProcessing p_proj group: {p_proj_key}")
+                    p_proj_group = f[p_proj_key]
+                    print(f"p_proj group attributes: {dict(p_proj_group.attrs)}")
                     
-                    # Compute TMI for each sample
-                    tmi_values = [compute_tmi_from_singular_values(sv, n, threshold) 
-                                for sv in singular_values]
+                    tmi_means = []
+                    tmi_sems = []
                     
-                    tmi_means.append(np.mean(tmi_values))
-                    tmi_sems.append(stats.sem(tmi_values))
-                
-                results[L][p_proj_key] = {
-                    'tmi_mean': tmi_means,
-                    'tmi_sem': tmi_sems
-                }
+                    sv_group = p_proj_group['singular_values']
+                    print("\nSingular value datasets:")
+                    for key in sv_group.keys():
+                        print(f"{key}: shape {sv_group[key].shape}")
+                    
+                    num_p_ctrl = len(p_proj_group['p_ctrl'])
+                    print(f"Number of p_ctrl values: {num_p_ctrl}")
+                    print(f"p_ctrl values: {p_proj_group['p_ctrl'][:]}")
+
+                    for p_ctrl_idx in range(num_p_ctrl):
+                        # Get singular values for all samples at this p_ctrl
+                        num_samples = sv_group[list(sv_group.keys())[0]].shape[1]  # Get number of samples
+                        singular_values = [{
+                            key: sv_group[key][p_ctrl_idx, sample_idx] 
+                            for key in sv_group.keys()
+                        } for sample_idx in range(num_samples)]
+                        
+                        # Compute TMI for each sample
+                        tmi_values = [compute_tmi_from_singular_values(sv, n, threshold) 
+                                    for sv in singular_values]
+                        
+                        tmi_mean = np.mean(tmi_values)
+                        tmi_sem = stats.sem(tmi_values)
+                        
+                        tmi_means.append(tmi_mean)
+                        tmi_sems.append(tmi_sem)
+                        
+                        # Write to CSV
+                        writer.writerow([L, p_proj_key, p_ctrl_idx, tmi_mean, tmi_sem])
+                    
+                    results[L][p_proj_key] = {
+                        'tmi_mean': tmi_means,
+                        'tmi_sem': tmi_sems
+                    }
     
     return results
 
@@ -143,7 +181,7 @@ def plot_tmi_vs_pctrl(L_values, n=0, threshold=1e-10):
 # Example usage
 if __name__ == "__main__":
     # Plot results for different Rényi indices
-    L_values = [8, 12, 16]
+    L_values = [8, 12, 16, 20]
     n_values = [0]
     threshold = 1e-10
     
