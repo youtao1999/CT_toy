@@ -14,13 +14,15 @@
 # Check if L is provided
 if [ -z "$1" ]; then
     echo "Error: Please provide L value"
-    echo "Usage: sbatch --ntasks=<ncpu> submit_tmi.sh <L>"
+    echo "Usage: sbatch --ntasks=<ncpu> submit_tmi_fine.sh <L> <p_proj> <p_c>"
     echo "Note: ntasks must divide 2000 evenly"
     exit 1
 fi
 
 # Set L from command line argument
 L=$1
+p_proj=$2
+p_c=$3
 NCPU=$SLURM_NTASKS
 JOB_ID=$SLURM_JOB_ID
 
@@ -52,7 +54,7 @@ export NUMEXPR_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
 # Create directory for this L value
-mkdir -p tmi_pctrl_results_L${L}
+mkdir -p tmi_pctrl_fine_L${L}_pproj${p_proj}_pc${p_c}
 
 # Run the MPI program
-srun python3 tmi_pctrl_calc.py --L $L --ncpu $NCPU
+srun python3 tmi_pctrl_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_proj $p_proj
