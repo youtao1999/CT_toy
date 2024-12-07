@@ -1,11 +1,123 @@
-from plot_tmi_results import read_tmi_results
 from scipy.optimize import minimize
+from scipy import stats
+import h5py
+from plot_tmi_results import compute_tmi_from_singular_values
 import numpy as np
 import matplotlib.pyplot as plt
 from lmfit import minimize, Parameters
 import os
 # Set a specific backend if needed
 # matplotlib.use('TkAgg')  # Uncomment if you need to specify a backend
+
+def read_tmi_results_fine(p_proj, p_c, L_values, n=0, threshold=1e-10):
+    """
+    Read singular values from HDF5 files and compute TMI statistics, then write results to a CSV file.
+    If the CSV file already exists, read results from it instead.
+    """
+    import csv
+
+    output_filename = f'tmi_results_fine_pproj{p_proj:.3f}_pc{p_c:.3f}.csv'
+    # Check if the output file already exists
+    if os.path.exists(output_filename):
+        print(f"Output file {output_filename} already exists. Reading results from it.")
+        results = {}
+        with open(output_filename, mode='r') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                L = int(row['L'])
+                p_proj_key = row['p_proj']
+                p_ctrl_idx = int(row['p_ctrl_index'])
+                p_ctrl_value = float(row['p_ctrl_value'])
+                tmi_mean = float(row['tmi_mean'])
+                tmi_sem = float(row['tmi_sem'])
+                
+                if L not in results:
+                    results[L] = {}
+                if p_proj_key not in results[L]:
+                    results[L][p_proj_key] = {'tmi_mean': [], 'tmi_sem': [], 'p_ctrl_values': []}
+                
+                results[L][p_proj_key]['tmi_mean'].append(tmi_mean)
+                results[L][p_proj_key]['tmi_sem'].append(tmi_sem)
+                results[L][p_proj_key]['p_ctrl_values'].append(p_ctrl_value)
+        
+        return results
+
+    results = {}
+    
+    # Prepare to write to CSV
+    with open(output_filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        # Write header
+        writer.writerow(['L', 'p_proj', 'p_ctrl_index', 'p_ctrl_value', 'tmi_mean', 'tmi_sem'])
+        
+        for L in L_values:
+            filename = f'tmi_pctrl_fine_L{L}_pproj{p_proj}_pc{p_c}/final_results_L{L}.h5'
+            if not os.path.exists(filename):
+                print(f"Warning: File {filename} not found!")
+                continue
+                
+            print(f"\nAnalyzing file: {filename}")
+            with h5py.File(filename, 'r') as f:
+                # Print file attributes
+                print(f"File attributes: {dict(f.attrs)}")
+                
+                # Print structure of groups and datasets
+                print("\nFile structure:")
+                def print_structure(name, obj):
+                    if isinstance(obj, h5py.Group):
+                        print(f"GROUP: {name}/")
+                    elif isinstance(obj, h5py.Dataset):
+                        print(f"DATASET: {name}, shape: {obj.shape}, dtype: {obj.dtype}")
+                f.visititems(print_structure)
+                
+                results[L] = {}
+                
+                p_proj_key = f"pproj{p_proj:.3f}"  # Format as "pproj0.500" instead of "0.5"
+                p_proj_group = f[p_proj_key]
+                print(f"\nProcessing p_proj group: {p_proj_key}")
+                print(f"p_proj group attributes: {dict(p_proj_group.attrs)}")
+                
+                tmi_means = []
+                tmi_sems = []
+                p_ctrl_values = p_proj_group['p_ctrl'][:]  # Get p_ctrl values
+                
+                sv_group = p_proj_group['singular_values']
+                print("\nSingular value datasets:")
+                for key in sv_group.keys():
+                    print(f"{key}: shape {sv_group[key].shape}")
+                
+                num_p_ctrl = len(p_proj_group['p_ctrl'])
+                print(f"Number of p_ctrl values: {num_p_ctrl}")
+                print(f"p_ctrl values: {p_proj_group['p_ctrl'][:]}")
+
+                for p_ctrl_idx in range(num_p_ctrl):
+                    # Get singular values for all samples at this p_ctrl
+                    num_samples = sv_group[list(sv_group.keys())[0]].shape[1]  # Get number of samples
+                    singular_values = [{
+                        key: sv_group[key][p_ctrl_idx, sample_idx] 
+                        for key in sv_group.keys()
+                    } for sample_idx in range(num_samples)]
+                    
+                    # Compute TMI for each sample
+                    tmi_values = [compute_tmi_from_singular_values(sv, n, threshold) 
+                                for sv in singular_values]
+                    
+                    tmi_mean = np.mean(tmi_values)
+                    tmi_sem = stats.sem(tmi_values)
+                    
+                    tmi_means.append(tmi_mean)
+                    tmi_sems.append(tmi_sem)
+                    
+                    # Write to CSV with p_ctrl value
+                    writer.writerow([L, p_proj_key, p_ctrl_idx, p_ctrl_values[p_ctrl_idx], tmi_mean, tmi_sem])
+                
+                results[L][p_proj_key] = {
+                    'tmi_mean': tmi_means,
+                    'tmi_sem': tmi_sems,
+                    'p_ctrl_values': p_ctrl_values.tolist()
+                }
+    
+    return results
 
 # Linear interpolation function
 def linear_interpolation(x_sorted, y_sorted, sigma_y_sorted, x_target):
@@ -64,76 +176,73 @@ def residuals_lmfit(params, p_all, L_all, y_all, sigma_y_all):
 
     return np.array(residuals)  # Convert to numpy array before returning
 
-def data_collapse(L_values = [8, 12, 16, 20], n=0, threshold=1e-10):
+def data_collapse(p_proj, p_c, L_values = [8, 12, 16, 20], n=0, threshold=1e-10):
     """
     Plot TMI vs p_ctrl with error bars for each p_proj value, comparing different L values.
     Uses specified Rényi entropy index n and threshold.
     """
     # Read and process data
-    unarranged_data = read_tmi_results(L_values, n, threshold)
+    unarranged_data = read_tmi_results_fine(p_proj, p_c, L_values, n, threshold)
     
-    # Get p_proj values from first L
-    L_first = L_values[0]
-    p_proj_values = sorted([float(key.replace('pproj', '')) for key in unarranged_data[L_first].keys()])
+    # # Get p_ctrl values
+    # Extract p_ctrl values from first L value's data
+    first_L = L_values[0]
+    first_pproj_key = f'pproj{p_proj:.3f}'
+    p_ctrl_values = unarranged_data[first_L][first_pproj_key]['p_ctrl_values']
+
+    # Rearrange all data
+    p_all = [p_ctrl_values] * len(L_values)
+    L_all = [np.ones(len(p_ctrl_values)) * L for L in L_values]
+    y_all = [unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_mean'] for L in L_values]
+    sigma_y_all = [unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_sem'] for L in L_values]
+
+    # Modify parameter initialization
+    params = Parameters()
+    params.add('pc', value=0.5, min=0.3, max=0.7, vary=True)
+    params.add('nu', value=1.0, min=0.5, max=2.0, vary=True)
     
-    # Get p_ctrl values
-    p_ctrl_values = np.linspace(0, 0.6, len(unarranged_data[L_first][f'pproj{p_proj_values[0]:.3f}']['tmi_mean']))
+    # Add more robust fitting options
+    result = minimize(residuals_lmfit, 
+                    params, 
+                    args=(p_all, L_all, y_all, sigma_y_all),
+                    method='leastsq',  # Try other methods like 'nelder', 'powell'
+                    max_nfev=1000,
+                    ftol=1e-11,
+                    xtol=1e-11)
 
-    for p_proj_index in range(len(p_proj_values)):
-        # Rearrange all data
-        p_proj = p_proj_values[p_proj_index]
-        p_all = [p_ctrl_values] * len(L_values)
-        L_all = [np.ones(len(p_ctrl_values)) * L for L in L_values]
-        y_all = [unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_mean'] for L in L_values]
-        sigma_y_all = [unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_sem'] for L in L_values]
+    # Print selective results
+    print(f"\nResults for p_proj = {p_proj}:")
+    print(f"Critical point (pc) = {result.params['pc'].value:.6f} ± {result.params['pc'].stderr:.6f}")
+    print(f"Critical exponent (nu) = {result.params['nu'].value:.6f} ± {result.params['nu'].stderr:.6f}")
+    print(f"Reduced chi-square = {result.redchi:.6f}")
 
-        # Modify parameter initialization
-        params = Parameters()
-        params.add('pc', value=0.5, min=0.3, max=0.7, vary=True)
-        params.add('nu', value=1.0, min=0.5, max=2.0, vary=True)
-        
-        # Add more robust fitting options
-        result = minimize(residuals_lmfit, 
-                        params, 
-                        args=(p_all, L_all, y_all, sigma_y_all),
-                        method='leastsq',  # Try other methods like 'nelder', 'powell'
-                        max_nfev=1000,
-                        ftol=1e-11,
-                        xtol=1e-11)
+    # Plot results
+    # Create the scaled x values using fitted parameters
+    pc = result.params['pc'].value
+    nu = result.params['nu'].value
     
-        # Print selective results
-        print(f"\nResults for p_proj = {p_proj}:")
-        print(f"Critical point (pc) = {result.params['pc'].value:.6f} ± {result.params['pc'].stderr:.6f}")
-        print(f"Critical exponent (nu) = {result.params['nu'].value:.6f} ± {result.params['nu'].stderr:.6f}")
-        print(f"Reduced chi-square = {result.redchi:.6f}")
-
-        # Plot results
-        # Create the scaled x values using fitted parameters
-        pc = result.params['pc'].value
-        nu = result.params['nu'].value
+    plt.figure(figsize=(10, 6))
+    
+    # Plot data points with error bars for each L value
+    for i, L in enumerate(L_values):
+        x_scaled = (p_ctrl_values - pc) * L**(1/nu)
+        y = unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_mean']
+        yerr = unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_sem']
         
-        plt.figure(figsize=(10, 6))
-        
-        # Plot data points with error bars for each L value
-        for i, L in enumerate(L_values):
-            x_scaled = (p_ctrl_values - pc) * L**(1/nu)
-            y = unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_mean']
-            yerr = unarranged_data[L][f'pproj{p_proj:.3f}']['tmi_sem']
-            
-            plt.errorbar(x_scaled, y, yerr=yerr, fmt='o', label=f'L={L}')
-        
-        plt.xlabel(r'$(p - p_c)L^{1/\nu}$')
-        plt.ylabel('TMI')
-        plt.title(f'Data Collapse for $p_{{proj}} = {p_proj:.3f}$')
-        plt.legend()
-        plt.grid(True)
-        # Create plots directory if it doesn't exist
-        os.makedirs('plots', exist_ok=True)
-        # Save plot with descriptive filename
-        plt.savefig(f'plots/data_collapse_pproj_{p_proj:.3f}.png', dpi=300, bbox_inches='tight')
-        plt.close()  # Close the figure to free memory
+        plt.errorbar(x_scaled, y, yerr=yerr, fmt='o', label=f'L={L}')
+    
+    plt.xlabel(f'$(p - {pc:.3f})L^{{1/{nu:.3f}}}$')
+    plt.ylabel('TMI')
+    plt.title(f'Data Collapse for $p_{{proj}} = {p_proj:.3f}$')
+    plt.legend()
+    plt.grid(True)
+    # Create plots directory if it doesn't exist
+    os.makedirs('_data_collapse_plots', exist_ok=True)
+    # Save plot with descriptive filename
+    plt.savefig(f'_data_collapse_plots/data_collapse_pproj_{p_proj:.3f}.png', dpi=300, bbox_inches='tight')
+    plt.close()  # Close the figure to free memory
 
 if __name__ == "__main__":
-    data_collapse()
+    data_collapse(p_proj=0.536, p_c=0.48)
 
     

@@ -109,7 +109,7 @@ def main():
     parser.add_argument('--p_proj', type=float, required=True, help='Projection probability p_proj')
     parser.add_argument('--ncpu', type=int, required=True, help='Number of CPUs/MPI processes')
     parser.add_argument('--p_c', type=float, required=True, help='Critical point p_c')
-    parser.add_argument('--delta_p', type=float, required=False, default=0.1, help='Range of p_ctrl around p_c')
+    parser.add_argument('--delta_p', type=float, required=False, default=0.05, help='Range of p_ctrl around p_c')
     parser.add_argument('--num_p_ctrl', type=int, required=False, default=20, help='Number of p_ctrl values linearly spaced between p_c-delta_p and p_c+delta_p')
     parser.add_argument('--total_samples', type=int, required=False, default=2000, help='Total number of samples')
     args = parser.parse_args()
@@ -139,9 +139,10 @@ def main():
         print(f"Each CPU will process chunk_size = {chunk_size} samples")
         print(f"Total samples = {args.total_samples}")
     
+    # Define output directory
+    output_dir = f'tmi_pctrl_fine_L{args.L}_pproj{args.p_proj}_pc{args.p_c}'
     # Only rank 0 creates the directory
     if rank == 0:
-        output_dir = f'tmi_pctrl_fine_L{args.L}_pproj{args.p_proj}_pc{args.p_c}'
         os.makedirs(output_dir, exist_ok=True)
     
     # Wait for directory creation
@@ -188,11 +189,11 @@ class NumpyEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 if __name__ == "__main__":
-    main()
-    # output_dir = f'tmi0_pctrl_results_L20'
-    # p_proj_values = np.linspace(0.5, 1.0, 15)[:14]
-    # final_results = combine_results(output_dir, 20, p_proj_values)
+    # main()
+    output_dir = f'tmi_pctrl_fine_L20_pproj0.536_pc0.48'
+    p_proj = 0.536
+    final_results = combine_results(output_dir, 20, p_proj)
 
-    # # Save final results
-    # with open(os.path.join(output_dir, f'final_results_L20.json'), 'w') as f:
-    #     json.dump(final_results, f)
+    # Save final results
+    with open(os.path.join(output_dir, f'final_results_L20_pproj{p_proj}.json'), 'w') as f:
+        json.dump(final_results, f)
