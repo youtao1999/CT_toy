@@ -3,7 +3,7 @@
 #SBATCH --job-name=tmi_calc        # Job name
 #SBATCH --output=tmi_%j.out        # Output file with job ID
 #SBATCH --error=tmi_%j.err         # Error file with job ID
-#SBATCH --time=10:00:00            # Time limit (10 hours)
+#SBATCH --time=20:00:00            # Time limit (20 hours)
 #SBATCH --mem-per-cpu=4G           # Memory per CPU
 #SBATCH --cpus-per-task=1          # Ensure one CPU per task
 
@@ -21,8 +21,9 @@ fi
 
 # Set L from command line argument
 L=$1
-p_proj=$2
-p_c=$3
+p_fixed_name=$2
+p_fixed=$3
+p_c=$4
 NCPU=$SLURM_NTASKS
 JOB_ID=$SLURM_JOB_ID
 
@@ -54,7 +55,8 @@ export NUMEXPR_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
 # Create directory for this L value
-mkdir -p tmi_pctrl_fine_L${L}_pproj${p_proj}_pc${p_c}
+mkdir -p tmi_fine_L${L}_${p_fixed_name}$(printf "%.3f" $p_fixed)_pc${p_c}
 
 # Run the MPI program
-srun python3 tmi_pctrl_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_proj $p_proj
+srun python3 tmi_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_fixed $p_fixed --p_fixed_name $p_fixed_name
+
