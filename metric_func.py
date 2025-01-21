@@ -13,6 +13,11 @@ def tripartite_mutual_information_tao(vec, L, n=1, threshold=1e-10, return_singu
     """
     if L % 4 != 0:
         raise ValueError("L must be divisible by 4")
+    
+    if n == 0:
+        threshold = 1e-15
+    else:
+        threshold = 1e-10
 
     subregion_size = L // 4
 

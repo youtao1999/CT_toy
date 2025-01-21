@@ -207,11 +207,11 @@ class NumpyEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 if __name__ == "__main__":
-    main()
-    # output_dir = f'tmi_fine_L20_pproj0.5_pc0.5'
-    # p_fixed = 0.5
-    # final_results = combine_results(output_dir, 20, p_fixed, 'pproj')
+    # main()
+    output_dir = f'tmi_fine_L20_pproj0.536_pc0.49'
+    p_fixed = 0.536
+    final_results = combine_results(output_dir, 20, p_fixed, 'pproj')
 
-    # # Save final results
-    # with open(os.path.join(output_dir, f'final_results_L20_pproj{p_fixed}.json'), 'w') as f:
-    #     json.dump(final_results, f)
+    # Save final results
+    with open(os.path.join(output_dir, f'final_results_L20_pproj{p_fixed}.json'), 'w') as f:
+        json.dump(final_results, f)
