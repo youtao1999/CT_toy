@@ -215,15 +215,32 @@ def read_tmi_results_to_df(p_fixed, p_fixed_name, p_c, L_values, n=0, threshold=
 def linear_interpolation(x_sorted, y_sorted, sigma_y_sorted, x_target):
     """
     Perform linear interpolation to estimate y' and sigma at x_target.
-    Correctly computes the slope and handles endpoints.
+    x_target is guaranteed to be one of the values in x_sorted.
     """
     n = len(x_sorted)
     
+    # Handle first point
+    if x_target == x_sorted[0]:
+        slope = (y_sorted[1] - y_sorted[0]) / (x_sorted[1] - x_sorted[0])
+        y_prime = y_sorted[0]
+        # Propagate errors using two points
+        sigma_prime = np.sqrt(sigma_y_sorted[0]**2 + sigma_y_sorted[1]**2)
+        return y_prime, sigma_prime
+        
+    # Handle last point
+    if x_target == x_sorted[-1]:
+        slope = (y_sorted[-1] - y_sorted[-2]) / (x_sorted[-1] - x_sorted[-2])
+        y_prime = y_sorted[-1]
+        # Propagate errors using two points
+        sigma_prime = np.sqrt(sigma_y_sorted[-1]**2 + sigma_y_sorted[-2]**2)
+        return y_prime, sigma_prime
+    
+    # Handle middle points with three-point interpolation
     for i in range(1, n - 1):
-        if x_sorted[i - 1] <= x_target <= x_sorted[i + 1]:
+        if x_target == x_sorted[i]:
             # Use the updated slope with three points
             slope = (y_sorted[i + 1] - y_sorted[i - 1]) / (x_sorted[i + 1] - x_sorted[i - 1])
-            y_prime = y_sorted[i - 1] + slope * (x_target - x_sorted[i - 1])
+            y_prime = y_sorted[i]
             
             # Propagate errors using three points
             term1 = sigma_y_sorted[i - 1] ** 2 * ((x_sorted[i + 1] - x_target) / (x_sorted[i + 1] - x_sorted[i - 1])) ** 2
@@ -231,41 +248,48 @@ def linear_interpolation(x_sorted, y_sorted, sigma_y_sorted, x_target):
             sigma_prime = np.sqrt(sigma_y_sorted[i] ** 2 + term1 + term2)
             
             return y_prime, sigma_prime
-    
-    # Handle endpoints with one-sided interpolation
-    if x_target < x_sorted[0]:
-        slope = (y_sorted[1] - y_sorted[0]) / (x_sorted[1] - x_sorted[0])
-        y_prime = y_sorted[0] + slope * (x_target - x_sorted[0])
-        sigma_prime = sigma_y_sorted[0]
-        return y_prime, sigma_prime
-    
-    if x_target > x_sorted[-1]:
-        slope = (y_sorted[-1] - y_sorted[-2]) / (x_sorted[-1] - x_sorted[-2])
-        y_prime = y_sorted[-1] + slope * (x_target - x_sorted[-1])
-        sigma_prime = sigma_y_sorted[-1]
-        return y_prime, sigma_prime
+            
+    raise ValueError("x_target not found in x_sorted. This should never happen.")
 
 # Residual function for lmfit
 def residuals_lmfit(params, p_all, L_all, y_all, sigma_y_all):
     """
     Compute the residuals for lmfit, incorporating all system sizes.
     """
-    pc = params['pc']
-    nu = params['nu']
-    residuals = []
-
-    # Calculate x values
-    x = abs(np.concatenate(p_all) - pc * np.ones(len(np.concatenate(p_all)))) * np.concatenate(L_all)**(1 / nu * np.ones(len(np.concatenate(L_all))))
+    pc = params['pc'].value
+    nu = params['nu'].value
+    
+    # Print parameter values during optimization
+    print(f"Testing pc={pc:.6f}, nu={nu:.6f}")
+    
+    # Calculate x values and sort everything
+    x = abs(np.concatenate(p_all) - pc) * np.concatenate(L_all)**(1/nu)
     sorted_indices = np.argsort(x)
     x_sorted = x[sorted_indices]
     y_sorted = np.concatenate(y_all)[sorted_indices]
     sigma_y_sorted = np.concatenate(sigma_y_all)[sorted_indices]
 
+    # Let's print some intermediate values to debug
+    print(f"First few x values: {x_sorted[:5]}")
+    print(f"First few y values: {y_sorted[:5]}")
+    
+    residuals = []
     for i, x_val in enumerate(x_sorted):
         y_prime, sigma_prime = linear_interpolation(x_sorted, y_sorted, sigma_y_sorted, x_val)
-        residuals.append((y_sorted[i] - y_prime) / sigma_prime)
-
-    return np.array(residuals)  # Convert to numpy array before returning
+        residual = (y_sorted[i] - y_prime) / sigma_prime
+        
+        # Print first few interpolation results
+        if i < 5:
+            print(f"Point {i}: x={x_val:.6f}, y={y_sorted[i]:.6f}, y_prime={y_prime:.6f}, "
+                  f"sigma={sigma_prime:.6f}, residual={residual:.6f}")
+        
+        residuals.append(residual)
+    
+    residuals = np.array(residuals)
+    print(f"Residuals stats: mean={np.mean(residuals):.2e}, std={np.std(residuals):.2e}, "
+          f"min={np.min(residuals):.2e}, max={np.max(residuals):.2e}")
+    
+    return residuals
 
 def data_collapse(p_fixed, p_fixed_name, p_c, L_values = [8, 12, 16, 20], n=0, threshold=1e-10):
     """
@@ -300,19 +324,65 @@ def data_collapse(p_fixed, p_fixed_name, p_c, L_values = [8, 12, 16, 20], n=0, t
         y_all.append(means)
         sigma_y_all.append(sems)
 
-    # Modify parameter initialization
+    # Modify parameter initialization and fitting
     params = Parameters()
-    params.add('pc', value=0.5, min=0.3, max=0.7, vary=True)
-    params.add('nu', value=1.0, min=0.5, max=2.0, vary=True)
+    params.add('pc', value=0.5, min=0.3, max=0.7, vary=True, brute_step=0.01)
+    params.add('nu', value=1.0, min=0.5, max=2.0, vary=True, brute_step=0.01)
     
-    # Add more robust fitting options
-    result = minimize(residuals_lmfit, 
-                    params, 
-                    args=(p_all, L_all, y_all, sigma_y_all),
-                    method='leastsq',  # Try other methods like 'nelder', 'powell'
-                    max_nfev=10000,
-                    ftol=1e-11,
-                    xtol=1e-11)
+    # Try different methods if leastsq fails
+    methods = ['leastsq', 'nelder', 'powell']
+    best_result = None
+    best_chisqr = np.inf
+
+    for method in methods:
+        try:
+            # Set method-specific parameters
+            fit_kwargs = {
+                'calc_covar': True,
+                'nan_policy': 'raise',
+                'max_nfev': 10000
+            }
+            
+            # Add method-specific parameters
+            if method == 'leastsq':
+                fit_kwargs.update({
+                    'ftol': 1e-8,
+                    'xtol': 1e-8
+                })
+            
+            result = minimize(residuals_lmfit, 
+                         params, 
+                         args=(p_all, L_all, y_all, sigma_y_all),
+                         method=method,
+                         **fit_kwargs)
+            
+            if result.success and result.chisqr < best_chisqr and result.chisqr > 0:
+                best_result = result
+                best_chisqr = result.chisqr
+                
+        except Exception as e:
+            print(f"Method {method} failed with error: {str(e)}")
+            continue
+    
+    if best_result is None:
+        raise ValueError("All fitting methods failed")
+        
+    result = best_result
+
+    # Print more detailed fit diagnostics
+    print("\nFit Diagnostics:")
+    print(f"Success: {result.success}")
+    print(f"Message: {result.message}")
+    print(f"Number of function evaluations: {result.nfev}")
+    print(f"Number of variables: {result.nvarys}")
+    print(f"Number of data points: {result.ndata}")
+    print(f"Degrees of freedom: {result.nfree}")
+    print(f"Chi-square: {result.chisqr}")
+    print(f"Reduced chi-square: {result.redchi}")
+    if result.covar is not None:
+        print("Covariance matrix was calculated")
+    else:
+        print("Warning: Covariance matrix calculation failed")
 
     # Print selective results
     print(f"\nResults for {p_fixed_name} = {p_fixed}:")
@@ -357,4 +427,4 @@ def data_collapse(p_fixed, p_fixed_name, p_c, L_values = [8, 12, 16, 20], n=0, t
     plt.close()  # Close the figure to free memory
 
 if __name__ == "__main__":
-    data_collapse(p_fixed=0.607, p_fixed_name='pproj', p_c=0.48)
+    data_collapse(p_fixed=0.500, p_fixed_name='pproj', p_c=0.500)
