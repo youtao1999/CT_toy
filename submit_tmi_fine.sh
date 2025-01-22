@@ -24,6 +24,9 @@ L=$1
 p_fixed_name=$2
 p_fixed=$3
 p_c=$4
+delta_p=$5
+num_p_scan=$6
+total_samples=$7
 NCPU=$SLURM_NTASKS
 JOB_ID=$SLURM_JOB_ID
 
@@ -32,8 +35,8 @@ mv "tmi_${JOB_ID}.out" "tmi_L${L}_${JOB_ID}.out"
 mv "tmi_${JOB_ID}.err" "tmi_L${L}_${JOB_ID}.err"
 
 # Verify ncpu is valid
-if [ $((2000 % NCPU)) -ne 0 ]; then
-    echo "Error: Number of CPUs ($NCPU) must divide 2000 evenly"
+if [ $((total_samples % NCPU)) -ne 0 ]; then
+    echo "Error: Number of CPUs ($NCPU) must divide total_samples ($total_samples) evenly"
     echo "Valid CPU counts are: 1, 2, 4, 5, 8, 10, 16, 20, 25, 40, 50, 80, 100, 125, 200, 250, 400, 500, 1000, 2000"
     exit 1
 fi
@@ -58,5 +61,5 @@ export OPENBLAS_NUM_THREADS=1
 mkdir -p tmi_fine_L${L}_${p_fixed_name}$(printf "%.3f" $p_fixed)_pc${p_c}
 
 # Run the MPI program
-srun python3 tmi_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_fixed $p_fixed --p_fixed_name $p_fixed_name
+srun python3 tmi_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_fixed $p_fixed --p_fixed_name $p_fixed_name --delta_p $delta_p --num_p_scan $num_p_scan --total_samples $total_samples
 
