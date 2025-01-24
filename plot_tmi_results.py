@@ -15,7 +15,7 @@ def compute_entropy_from_singular_values(S, n=0, threshold=1e-10):
         entropy = -np.sum(np.log(eigenvalues) * eigenvalues)
         return 0 if np.isnan(entropy) else entropy
     elif n == 0:
-        return np.log((eigenvalues > threshold**2).sum())
+        return np.log((eigenvalues > np.finfo(float).eps).sum())
     elif n == np.inf:
         return -np.log(np.max(eigenvalues))
     else:
