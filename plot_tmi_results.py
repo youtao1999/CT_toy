@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 from scipy import stats
 
-def compute_entropy_from_singular_values(S, n=0, threshold=1e-10):
+def compute_entropy_from_singular_values(S, n, threshold):
     """
     Compute von Neumann entropy from singular values with specified Rényi index.
     """
@@ -15,13 +15,13 @@ def compute_entropy_from_singular_values(S, n=0, threshold=1e-10):
         entropy = -np.sum(np.log(eigenvalues) * eigenvalues)
         return 0 if np.isnan(entropy) else entropy
     elif n == 0:
-        return np.log((eigenvalues > np.finfo(float).eps).sum())
+        return np.log((eigenvalues > threshold).sum())
     elif n == np.inf:
         return -np.log(np.max(eigenvalues))
     else:
         return np.log(np.sum(eigenvalues**n)) / (1-n)
 
-def compute_tmi_from_singular_values(singular_values, n=0, threshold=1e-10):
+def compute_tmi_from_singular_values(singular_values, n, threshold):
     """
     Compute TMI from singular values using specified Rényi entropy index.
     """
