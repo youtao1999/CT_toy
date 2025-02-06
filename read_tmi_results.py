@@ -4,6 +4,8 @@ import os
 import numpy as np
 import h5py
 import csv
+import matplotlib.pyplot as plt
+from FSS.DataCollapse import DataCollapse
 
 def write_tmi_results_to_csv(df_final, p_fixed, p_fixed_name, current_threshold, output_filename=None):
     """
@@ -82,7 +84,7 @@ def read_and_compute_tmi_from_file(filename, p_fixed_name, p_fixed, n, current_t
     
     return data_list
 
-def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0):
+def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0, output_folder = "tmi_results_combined"):
     """Read TMI results, combining existing CSV data and optionally computing missing data."""
     import glob
     
@@ -99,21 +101,32 @@ def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0)
     results_dict = {}
     missing_thresholds = []
 
+    # check to see if the output folder exists, if not, create it
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    os.chdir(output_folder)
+
+    # check to make sure that we are in the correct directory
+    if os.path.basename(os.getcwd()) != output_folder:
+        raise RuntimeError(f"Could not find {output_folder} directory")
+    
     if thresholds is None:
 
         def extract_threshold(filename):
             """Extract threshold value from filename."""
             return float(filename.split('_threshold')[1].split('.csv')[0])
 
-        file_pattern = f'tmi_results_combined_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
+        file_pattern = f'{output_folder}_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
         all_files = glob.glob(file_pattern)
         thresholds = [extract_threshold(f) for f in all_files]
     else:
         thresholds = thresholds
 
+
+
     # Check existing CSV files for each threshold
     for threshold in thresholds:
-        filename = f'tmi_results_combined_{p_fixed_name}{p_fixed:.3f}_threshold{threshold:.1e}.csv'
+        filename = f'{output_folder}_{p_fixed_name}{p_fixed:.3f}_threshold{threshold:.1e}.csv'
         if os.path.exists(filename):
             print(f"Found existing data for threshold {threshold:.1e}")
             # Read and process CSV file
@@ -174,6 +187,9 @@ def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0)
         else:
             print("Skipping computation for missing thresholds.")
     
+    # change back to the original directory
+    os.chdir(current_dir)
+
     return results_dict
 
 def combine_csv_files(p_fixed, p_fixed_name):
@@ -310,12 +326,18 @@ def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.473, nu=0.7, L_min
                             nu_vary=nu_vary,
                             beta_vary=False)
         
-        # Store results
+        # Add debugging information
+        if res.params['nu'].stderr is None:
+            print(f"Warning: Sample {i+1} - stderr is None")
+            print(f"Fit success: {res.success}")
+            print(f"Fit message: {res.message}")
+            
+        # Store results with fallback for None stderr values
         results.append({
             'nu': res.params['nu'].value,
-            'nu_stderr': res.params['nu'].stderr,
+            'nu_stderr': res.params['nu'].stderr if res.params['nu'].stderr is not None else 0.0,
             'pc': res.params['p_c'].value,
-            'pc_stderr': res.params['p_c'].stderr,
+            'pc_stderr': res.params['p_c'].stderr if res.params['p_c'].stderr is not None else 0.0,
             'redchi': res.redchi
         })
         
@@ -333,6 +355,7 @@ def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.473, nu=0.7, L_min
     redchi_mean = np.mean(redchi_values)
     
     # Calculate total uncertainties (combining bootstrap spread and fit uncertainties)
+
     nu_std = np.sqrt(np.std(nu_values)**2 + np.mean([r['nu_stderr']**2 for r in results]))
     pc_std = np.sqrt(np.std(pc_values)**2 + np.mean([r['pc_stderr']**2 for r in results]))
     redchi_std = np.std(redchi_values)
@@ -347,48 +370,93 @@ def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.473, nu=0.7, L_min
         'samples': results
     }
 
+def plot_loss_manifold(df, pc_range, nu_range, n_points=50, pc = 0.473, delta_p = 0.05, L_min = 12):
+    """
+    Visualize the loss function manifold for different values of pc and nu
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with MultiIndex (p, L) containing TMI observations
+    pc_range : tuple
+        (min_pc, max_pc) range to explore
+    nu_range : tuple
+        (min_nu, max_nu) range to explore
+    n_points : int
+        Number of points to sample in each dimension
+    """    
+    # Initialize parameters
+    p_range = [pc - delta_p, pc + delta_p]
+
+    # Create a DataCollapse object from the DataFrame
+    dc = DataCollapse(df, 
+                     p_='p', 
+                     L_='L',
+                     params={},
+                     p_range=p_range,  # Now using appropriate p_range
+                     Lmin=L_min)
+
+    
+    # Create meshgrid of pc and nu values
+    pc_vals = np.linspace(pc_range[0], pc_range[1], n_points)
+    nu_vals = np.linspace(nu_range[0], nu_range[1], n_points)
+    PC, NU = np.meshgrid(pc_vals, nu_vals)
+    
+    # Calculate loss for each point
+    Z = np.zeros_like(PC)
+    for i in range(n_points):
+        for j in range(n_points):
+            loss_vals = dc.loss(PC[i,j], NU[i,j], beta=0)
+            Z[i,j] = np.sum(loss_vals**2) / (len(loss_vals) - 2)
+    
+    # Create plots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Contour plot
+    cont = ax1.contour(PC, NU, Z, levels=20)
+    ax1.clabel(cont, inline=True, fontsize=8)
+    ax1.set_xlabel('p_c')
+    ax1.set_ylabel('nu')
+    ax1.set_title('Loss Function Contours')
+    
+    # 3D surface plot
+    surf = ax2.pcolormesh(PC, NU, np.log10(Z), shading='auto')
+    ax2.set_xlabel('p_c')
+    ax2.set_ylabel('nu')
+    ax2.set_title('Log10 Loss Function (Color Map)')
+    plt.colorbar(surf, ax=ax2)
+    
+    plt.tight_layout()
+    return fig, (ax1, ax2)
+
 if __name__ == "__main__":  
-    results = read_tmi_results(p_fixed=0.643, p_fixed_name='pproj',thresholds=None)
+    results = read_tmi_results(p_fixed=0.643, p_fixed_name='pproj', thresholds=[1.9e-19])
     thresholds = sorted(list(results.keys()))
-    # # Pick a specific p and L value
-    # p_test = list(results[list(results.keys())[0]].index.get_level_values('p'))[0]
-    # L_test = list(results[list(results.keys())[0]].index.get_level_values('L'))[0]
+    df = results[thresholds[0]]
+    
+    fig, (ax1, ax2) = plot_loss_manifold(df, pc_range = (0., 1.), nu_range = (0.5, 2.0), n_points=200)
+    plt.show()
 
-    # # Get TMI values across thresholds
-    # tmi_vs_threshold = []
-    # thresholds_list = list(results.keys())
-    # for threshold in thresholds_list:
-    #     df = results[threshold]
-    #     tmi_values = df.loc[(p_test, L_test), 'observations']
-    #     # Convert list of observations to their mean
-    #     if isinstance(tmi_values, list):
-    #         mean_tmi = np.mean(tmi_values)
-    #     else:
-    #         mean_tmi = np.mean(tmi_values.iloc[0])  # Handle case where tmi_values is a Series
-    #     tmi_vs_threshold.append(mean_tmi)
-
-    # # Plot results
-    # import matplotlib.pyplot as plt
-    # plt.figure(figsize=(10, 6))
-    # plt.semilogx(thresholds_list, tmi_vs_threshold, 'o-')
-    # plt.xlabel('Threshold')
-    # plt.ylabel('TMI')
-    # plt.title(f'TMI vs Threshold for p={p_test}, L={L_test}')
-    # plt.grid()
+    # fig, axes = plot_loss_manifold(dc, 
+    #                               pc_range=(0, 1), 
+    #                               nu_range=(0.5, 2.0), 
+    #                               n_points=50)
     # plt.show()
 
-    # Example of bootstrapping analysis
-    bootstrap_results = bootstrap_data_collapse(
-        df=results[thresholds[10]],  # Use first threshold's data
-        n_samples=100,
-        sample_size=1000,
-        p_c=0.473,
-        nu=0.7,
-        L_min=12,
-        L_max=20
-    )
+    # # Example of bootstrapping analysis
+    # bootstrap_results = bootstrap_data_collapse(
+    #     df=results[thresholds[0]],  # Use first threshold's data
+    #     n_samples=1,
+    #     sample_size=1000,
+    #     p_c=0.473,
+    #     nu=0.7,
+    #     L_min=12,
+    #     L_max=20
+    # )
     
-    print("\nBootstrap Analysis Results:")
-    print(f"nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
-    print(f"p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
-    print(f"reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+    # print("\nBootstrap Analysis Results:")
+    # print(f"nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
+    # print(f"p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
+    # print(f"reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+    
+    
