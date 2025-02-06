@@ -145,6 +145,9 @@ def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0,
             missing_thresholds.append(threshold)
     
     if missing_thresholds:
+        # change directory back to CT_toy
+        os.chdir(current_dir)
+
         print(f"\nMissing data for {len(missing_thresholds)} threshold values:")
         print(f"Thresholds: {[f'{t:.1e}' for t in missing_thresholds]}")
         compute = input("\nWould you like to compute these from H5 files? (yes/no): ").lower().strip()
@@ -180,15 +183,19 @@ def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0,
                     df = pd.DataFrame(data_list)
                     df_final = df.set_index(['p', 'L'])
                     
+                    # change directory to the result output directory tmi_results_combined
+                    os.chdir(output_folder)
                     # Write results to CSV
                     write_tmi_results_to_csv(df_final, p_fixed, p_fixed_name, threshold)
-                    
+                    # change back to the original directory
+                    os.chdir(current_dir)
                     results_dict[threshold] = df_final
         else:
             print("Skipping computation for missing thresholds.")
-    
-    # change back to the original directory
-    os.chdir(current_dir)
+
+    # make sure that we are in the original directory
+    if os.path.basename(os.getcwd()) != current_dir:
+        os.chdir(current_dir)
 
     return results_dict
 
@@ -430,18 +437,13 @@ def plot_loss_manifold(df, pc_range, nu_range, n_points=50, pc = 0.473, delta_p 
     return fig, (ax1, ax2)
 
 if __name__ == "__main__":  
-    results = read_tmi_results(p_fixed=0.643, p_fixed_name='pproj', thresholds=[1.9e-19])
-    thresholds = sorted(list(results.keys()))
+    # thresholds = np.logspace(-19, -10, 20)
+    thresholds = [1.0e-15]
+    results = read_tmi_results(p_fixed=0.643, p_fixed_name='pproj', thresholds=thresholds)
     df = results[thresholds[0]]
     
     fig, (ax1, ax2) = plot_loss_manifold(df, pc_range = (0., 1.), nu_range = (0.5, 2.0), n_points=200)
-    plt.show()
-
-    # fig, axes = plot_loss_manifold(dc, 
-    #                               pc_range=(0, 1), 
-    #                               nu_range=(0.5, 2.0), 
-    #                               n_points=50)
-    # plt.show()
+    plt.savefig('loss_manifold.png', dpi=300, bbox_inches='tight')
 
     # # Example of bootstrapping analysis
     # bootstrap_results = bootstrap_data_collapse(
