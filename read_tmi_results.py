@@ -439,26 +439,26 @@ def plot_loss_manifold(df, pc_range, nu_range, n_points=50, pc = 0.473, delta_p 
 if __name__ == "__main__":  
     # thresholds = np.logspace(-19, -10, 20)
     thresholds = [1.0e-15]
-    results = read_tmi_results(p_fixed=0.643, p_fixed_name='pproj', thresholds=thresholds)
+    results = read_tmi_results(p_fixed=0.000, p_fixed_name='pproj', thresholds=thresholds)
     df = results[thresholds[0]]
     
-    fig, (ax1, ax2) = plot_loss_manifold(df, pc_range = (0., 1.), nu_range = (0.5, 2.0), n_points=200)
+    fig, (ax1, ax2) = plot_loss_manifold(df, pc_range = (0., 1.), nu_range = (0.5, 1.5), pc = 0.45, delta_p = 0.1, n_points=200)
     plt.savefig('loss_manifold.png', dpi=300, bbox_inches='tight')
 
-    # # Example of bootstrapping analysis
-    # bootstrap_results = bootstrap_data_collapse(
-    #     df=results[thresholds[0]],  # Use first threshold's data
-    #     n_samples=1,
-    #     sample_size=1000,
-    #     p_c=0.473,
-    #     nu=0.7,
-    #     L_min=12,
-    #     L_max=20
-    # )
+    # Example of bootstrapping analysis
+    bootstrap_results = bootstrap_data_collapse(
+        df=results[thresholds[0]],  # Use first threshold's data
+        n_samples=100,
+        sample_size=1000,
+        p_c=0.45,
+        nu=0.5,
+        L_min=12,
+        L_max=20
+    )
     
-    # print("\nBootstrap Analysis Results:")
-    # print(f"nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
-    # print(f"p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
-    # print(f"reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+    print("\nBootstrap Analysis Results:")
+    print(f"nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
+    print(f"p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
+    print(f"reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
     
     

@@ -208,8 +208,8 @@ class NumpyEncoder(json.JSONEncoder):
 
 if __name__ == "__main__":
     main()
-    # output_dir = f'tmi_fine_L20_pproj0.536_pc0.49'
-    # p_fixed = 0.536
+    # output_dir = f'tmi_fine_L20_pproj0.750_pc0.25'
+    # p_fixed = 0.750
     # final_results = combine_results(output_dir, 20, p_fixed, 'pproj')
 
     # # Save final results
