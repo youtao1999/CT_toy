@@ -153,8 +153,8 @@ def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0,
         compute = input("\nWould you like to compute these from H5 files? (yes/no): ").lower().strip()
         
         if compute in ['y', 'yes']:
-            # Find all relevant HDF5 files
-            file_pattern = f'tmi_fine_L*_{p_fixed_name}{p_fixed:.3f}_pc*'
+            # Find all relevant HDF5 files - update pattern from tmi_fine to sv_fine
+            file_pattern = f'sv_fine_L*_{p_fixed_name}{p_fixed:.3f}_pc*'
             all_files = glob.glob(file_pattern)
             
             if not all_files:
@@ -172,7 +172,8 @@ def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0,
                 
                 for L in L_values:
                     for p_c in p_c_values:
-                        filename = f'tmi_fine_L{L}_{p_fixed_name}{p_fixed:.3f}_pc{p_c}/final_results_L{L}.h5'
+                        # Update filename pattern from tmi_fine to sv_fine
+                        filename = f'sv_fine_L{L}_{p_fixed_name}{p_fixed:.3f}_pc{p_c}/final_results_L{L}.h5'
                         file_results = read_and_compute_tmi_from_file(
                             filename, p_fixed_name, p_fixed, n, threshold
                         )
@@ -201,13 +202,13 @@ def read_tmi_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0,
 
 def combine_csv_files(p_fixed, p_fixed_name):
     import glob
-    file_pattern = f'tmi_results_*_{p_fixed_name}{p_fixed:.3f}*.csv'
+    file_pattern = f'sv_results_*_{p_fixed_name}{p_fixed:.3f}*.csv'
     all_files = glob.glob(file_pattern)
     print(all_files)
     # Filter out the combined files from the list
-    source_files = [f for f in all_files if not f.startswith('tmi_results_combined_')]
-    combined_files = [f for f in all_files if f.startswith('tmi_results_combined_')]
-    
+    source_files = [f for f in all_files if not f.startswith('sv_results_combined_')]
+    combined_files = [f for f in all_files if f.startswith('sv_results_combined_')]
+
     if not source_files:
         print("No source files found to combine")
         return None
@@ -228,12 +229,12 @@ def combine_csv_files(p_fixed, p_fixed_name):
         output_file = combined_files[0]
     else:
         final_df = combined_df
-        output_file = f'tmi_results_combined_{p_fixed_name}{p_fixed:.3f}.csv'
+        output_file = f'sv_results_combined_{p_fixed_name}{p_fixed:.3f}.csv'
     
     # Write the combined data
     final_df.to_csv(output_file, index=False)
     print(f"Combined data written to {output_file}")
-    return None
+    return None 
 
 def extract_threshold(filename):
     """Extract threshold value from filename."""

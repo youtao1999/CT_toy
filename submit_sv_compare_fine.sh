@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --partition=main           # Partition name
-#SBATCH --job-name=tmi_compare     # Job name
-#SBATCH --output=tmi_compare_%j.out # Output file with job ID
-#SBATCH --error=tmi_compare_%j.err  # Error file with job ID
+#SBATCH --job-name=sv_compare     # Job name
+#SBATCH --output=sv_compare_%j.out # Output file with job ID
+#SBATCH --error=sv_compare_%j.err  # Error file with job ID
 #SBATCH --time=20:00:00            # Time limit (20 hours)
 #SBATCH --mem-per-cpu=4G           # Memory per CPU
 #SBATCH --cpus-per-task=1          # Ensure one CPU per task

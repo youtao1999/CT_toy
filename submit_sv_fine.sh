@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --partition=main           # Partition name
-#SBATCH --job-name=tmi_calc        # Job name
-#SBATCH --output=tmi_%j.out        # Output file with job ID
-#SBATCH --error=tmi_%j.err         # Error file with job ID
+#SBATCH --job-name=sv_calc        # Job name
+#SBATCH --output=sv_%j.out        # Output file with job ID
+#SBATCH --error=sv_%j.err         # Error file with job ID
 #SBATCH --time=20:00:00            # Time limit (20 hours)
 #SBATCH --mem-per-cpu=4G           # Memory per CPU
 #SBATCH --cpus-per-task=1          # Ensure one CPU per task
@@ -31,8 +31,8 @@ NCPU=$SLURM_NTASKS
 JOB_ID=$SLURM_JOB_ID
 
 # Rename output and error files to include L value
-mv "tmi_${JOB_ID}.out" "tmi_L${L}_${JOB_ID}.out"
-mv "tmi_${JOB_ID}.err" "tmi_L${L}_${JOB_ID}.err"
+mv "sv_${JOB_ID}.out" "sv_L${L}_${JOB_ID}.out"
+mv "sv_${JOB_ID}.err" "sv_L${L}_${JOB_ID}.err"
 
 # Verify ncpu is valid
 if [ $((total_samples % NCPU)) -ne 0 ]; then
@@ -58,8 +58,7 @@ export NUMEXPR_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
 # Create directory for this L value
-mkdir -p tmi_fine_L${L}_${p_fixed_name}$(printf "%.3f" $p_fixed)_pc${p_c}
+mkdir -p sv_fine_L${L}_${p_fixed_name}$(printf "%.3f" $p_fixed)_pc${p_c}
 
 # Run the MPI program
-srun python3 tmi_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_fixed $p_fixed --p_fixed_name $p_fixed_name --delta_p $delta_p --num_p_scan $num_p_scan --total_samples $total_samples
-
+srun python3 sv_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_fixed $p_fixed --p_fixed_name $p_fixed_name --delta_p $delta_p --num_p_scan $num_p_scan --total_samples $total_samples

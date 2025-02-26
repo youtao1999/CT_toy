@@ -36,7 +36,7 @@ done
 # Create email with job results
 {
     echo "Job ID: $JOB_ID"
-    echo "Job Name: tmi_compare (L=${L}, ${p_fixed_name}=${p_fixed}, p_c=${p_c})"
+    echo "Job Name: sv_compare (L=${L}, ${p_fixed_name}=${p_fixed}, p_c=${p_c})"
     echo "Status: Completed"
     echo -e "\nOutput Log:"
     echo "------------"
