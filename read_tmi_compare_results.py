@@ -217,44 +217,26 @@ def read_tmi_compare_results(p_fixed, p_fixed_name, thresholds=None, L_values=No
         
         if compute in ['y', 'yes']:
             # Find all relevant HDF5 files
-            file_pattern = f'sv_comparison_L*_{p_fixed_name}{p_fixed:.3f}*'
+            file_pattern = f'sv_comparison_L*_{p_fixed_name}{p_fixed:.3f}_pc*'
             all_files = glob.glob(file_pattern)
-            
+            print(all_files)
             if not all_files:
                 print(f"No HDF5 files found matching pattern: {file_pattern}")
                 return results_dict
                 
-            # Extract unique L values and p_c values from filenames
+            # Extract unique L values from filenames
             if L_values is None:
                 L_values = sorted(list(set([int(f.split('_L')[1].split('_')[0]) for f in all_files])))
-            
-            # Fix the p_c extraction logic for the correct filename format
-            p_scan_name = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-            p_c_values = []
-            for f in all_files:
-                if f'_{p_scan_name}' in f:
-                    parts = f.split(f'_{p_scan_name}')
-                    print(parts)
-                    if len(parts) > 1:
-                        pc_part = parts[1].split('/')[0].split('_')[0]
-                        try:
-                            p_c_values.append(float(pc_part))
-                        except ValueError:
-                            print(f"Warning: Could not parse {p_scan_name} value from {f}")
-            
-            p_c_values = sorted(list(set(p_c_values)))
-            
-            if not p_c_values:
-                print(f"Warning: Could not extract any {p_scan_name} values from filenames")
-                return results_dict
-            
+            p_c_values = sorted(list(set([float(f.split('_pc')[2]) for f in all_files])))
+
             for threshold in missing_thresholds:
                 print(f"\nComputing for threshold {threshold:.1e}")
                 data_list = []
                 
                 for L in L_values:
                     for p_c in p_c_values:
-                        filename = f'sv_comparison_L{L}_{p_fixed_name}{p_fixed:.3f}_pc{p_c}/final_results_L{L}.h5'
+                        # Process all files for this L value and fixed parameter
+                        filename = f'sv_comparison_L{L}_{p_fixed_name}{p_fixed:.3f}_pc{p_c:.3f}/final_results_L{L}.h5'
                         file_results = read_and_compute_tmi_from_compare_file(
                             filename, p_fixed_name, p_fixed, n, threshold
                         )
@@ -407,7 +389,7 @@ if __name__ == "__main__":
             p_fixed=p_fixed,
             p_fixed_name=p_fixed_name,
             threshold=thresholds[0],
-            p_c=0.25,  # Example critical point
+            p_c=0.6,  # Example critical point
             save_fig=True
         )
         plt.show()
