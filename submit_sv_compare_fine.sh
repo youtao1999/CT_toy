@@ -57,8 +57,8 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
-# Create directory for output
-mkdir -p sv_comparison_L${L}_${p_fixed_name}${p_fixed}_pc${p_c}
+# # Create directory for output
+# mkdir -p sv_comparison_L${L}_${p_fixed_name}${p_fixed}_pc${p_c}
 
 # Run the MPI program
 srun python3 sv_compare_fine.py --L $L --p_fixed_name $p_fixed_name --p_fixed $p_fixed --ncpu $NCPU --p_c $p_c --delta_p $delta_p --num_p_scan $num_p_scan --total_samples $total_samples
