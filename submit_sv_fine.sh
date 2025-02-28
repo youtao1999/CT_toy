@@ -49,7 +49,8 @@ module purge
 module use /projects/community/modulefiles
 module load python/3.9.6-gc563
 module load hdf5/1.13.3-mpi-oneapi_2022-sw1088
-module load openmpi/2.1.1
+# module load openmpi/2.1.1
+module load openmpi/4.1.6
 
 # Disable hyperthreading
 export OMP_NUM_THREADS=1
@@ -61,4 +62,4 @@ export OPENBLAS_NUM_THREADS=1
 mkdir -p sv_fine_L${L}_${p_fixed_name}$(printf "%.3f" $p_fixed)_pc${p_c}
 
 # Run the MPI program
-srun python3 sv_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_fixed $p_fixed --p_fixed_name $p_fixed_name --delta_p $delta_p --num_p_scan $num_p_scan --total_samples $total_samples
+srun --mpi=pmix python3 sv_fine.py --L $L --ncpu $NCPU --p_c $p_c --p_fixed $p_fixed --p_fixed_name $p_fixed_name --delta_p $delta_p --num_p_scan $num_p_scan --total_samples $total_samples

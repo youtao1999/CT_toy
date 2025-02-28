@@ -1,4 +1,4 @@
-nohup run_sv_fine.sh 8 'pproj' 0.0 0.45 0.1 20 2000 20 > run_sv_fine_L8.log 2>&1 &
+nohup run_sv_fine.sh 8 'pproj' 0.0 0.45 0.1 20 20 20 > run_sv_fine_L8.log 2>&1 &
 nohup run_sv_fine.sh 12 'pproj' 0.0 0.45 0.1 20 2000 40 > run_sv_fine_L12.log 2>&1 &
 nohup run_sv_fine.sh 16 'pproj' 0.0 0.45 0.1 20 2000 100 > run_sv_fine_L16.log 2>&1 &
 nohup run_sv_fine.sh 20 'pproj' 0.0 0.45 0.1 20 2000 100 > run_sv_fine_L20.log 2>&1 &
