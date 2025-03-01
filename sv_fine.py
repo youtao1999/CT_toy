@@ -211,7 +211,3 @@ if __name__ == "__main__":
     # output_dir = f'tmi_fine_L20_pproj0.750_pc0.25'
     # p_fixed = 0.750
     # final_results = combine_results(output_dir, 20, p_fixed, 'pproj')
-
-    # # Save final results
-    # with open(os.path.join(output_dir, f'final_results_L20_pproj{p_fixed}.json'), 'w') as f:
-    #     json.dump(final_results, f)

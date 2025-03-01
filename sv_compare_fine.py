@@ -262,6 +262,10 @@ def main():
         print(f"Comparison completed. Results saved in '{output_dir}' folder.")
 
 if __name__ == "__main__":
-    main()
+    # main()
 
     # mpirun -np 4 python sv_compare_fine.py --L 8 --p_fixed_name pctrl --p_fixed 0.4 --ncpu 4 --p_c 0.6 --delta_p 0.1 --num_p_scan 20 --total_samples 20
+
+    output_dir = f'sv_comparison_L20_pctrl0.400_pc0.800'
+    p_fixed = 0.400
+    final_results = combine_results(output_dir, 20, p_fixed, 'pctrl')

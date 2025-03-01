@@ -369,6 +369,323 @@ def plot_tmi_comparison(results_dict, p_fixed, p_fixed_name, threshold, L_values
     
     return fig, ax
 
+def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.473, delta_p=0.05, L_min=12, 
+                              implementations=None, figsize=(15, 6), save_fig=True, output_dir=None):
+    """
+    Visualize and compare the loss function manifold for different implementations.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with MultiIndex (p, L, implementation) containing TMI observations
+    pc_range : tuple
+        (min_pc, max_pc) range to explore
+    nu_range : tuple
+        (min_nu, max_nu) range to explore
+    n_points : int
+        Number of points to sample in each dimension
+    pc : float
+        Center point for p_range
+    delta_p : float
+        Range around pc to include in analysis
+    L_min : int
+        Minimum system size to include
+    implementations : list, optional
+        List of implementations to compare (default: all in df)
+    figsize : tuple
+        Figure size
+    save_fig : bool
+        Whether to save the figure
+    output_dir : str, optional
+        Directory to save the figure
+        
+    Returns:
+    --------
+    tuple
+        (fig, axes) tuple
+    """
+    import numpy as np
+    from FSS.DataCollapse import DataCollapse
+    
+    # Set p_range around pc
+    p_range = [pc - delta_p, pc + delta_p]
+    
+    # Get unique implementations if not specified
+    if implementations is None:
+        implementations = df.index.get_level_values('implementation').unique()
+    
+    # Create figure with subplots for each implementation
+    fig, axes = plt.subplots(len(implementations), 2, figsize=figsize)
+    if len(implementations) == 1:
+        axes = [axes]  # Make axes indexable for single implementation
+    
+    # Create meshgrid of pc and nu values
+    pc_vals = np.linspace(pc_range[0], pc_range[1], n_points)
+    nu_vals = np.linspace(nu_range[0], nu_range[1], n_points)
+    PC, NU = np.meshgrid(pc_vals, nu_vals)
+    
+    # Process each implementation
+    for i, impl in enumerate(implementations):
+        # Filter data for this implementation
+        impl_df = df.xs(impl, level='implementation')
+        
+        # Create a DataCollapse object
+        dc = DataCollapse(impl_df, 
+                         p_='p', 
+                         L_='L',
+                         params={},
+                         p_range=p_range,
+                         Lmin=L_min)
+        
+        # Calculate loss for each point
+        Z = np.zeros_like(PC)
+        for j in range(n_points):
+            for k in range(n_points):
+                loss_vals = dc.loss(PC[j,k], NU[j,k], beta=0)
+                Z[j,k] = np.sum(loss_vals**2) / (len(loss_vals) - 2)
+        
+        # Contour plot
+        cont = axes[i][0].contour(PC, NU, Z, levels=20)
+        axes[i][0].clabel(cont, inline=True, fontsize=8)
+        axes[i][0].set_xlabel('p_c')
+        axes[i][0].set_ylabel('nu')
+        axes[i][0].set_title(f'{impl.capitalize()} Implementation - Loss Contours')
+        
+        # Color map plot
+        surf = axes[i][1].pcolormesh(PC, NU, np.log10(Z), shading='auto')
+        axes[i][1].set_xlabel('p_c')
+        axes[i][1].set_ylabel('nu')
+        axes[i][1].set_title(f'{impl.capitalize()} Implementation - Log10 Loss')
+        plt.colorbar(surf, ax=axes[i][1])
+    
+    plt.tight_layout()
+    
+    # Save figure if requested
+    if save_fig:
+        if output_dir is None:
+            output_dir = 'tmi_compare_plots'
+        os.makedirs(output_dir, exist_ok=True)
+        fig_path = os.path.join(output_dir, f'loss_manifold_comparison.png')
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+        print(f"Saved figure to {fig_path}")
+    
+    return fig, axes
+
+def compare_bootstrap_analysis(df, n_samples=100, sample_size=1000, p_c=0.473, nu=0.7, 
+                              L_min=None, L_max=None, p_range=None, seed=None, 
+                              implementations=None, nu_vary=True, p_c_vary=True):
+    """
+    Perform and compare bootstrapped data collapse analysis for different implementations.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with MultiIndex (p, L, implementation) containing TMI observations
+    n_samples : int
+        Number of bootstrap samples to generate
+    sample_size : int
+        Size of each bootstrap sample
+    p_c : float
+        Initial guess for critical point
+    nu : float
+        Initial guess for critical exponent
+    L_min : int, optional
+        Minimum system size to include
+    L_max : int, optional
+        Maximum system size to include
+    p_range : tuple, optional
+        (min, max) range of p values to include
+    seed : int, optional
+        Random seed for reproducibility
+    implementations : list, optional
+        List of implementations to compare (default: all in df)
+    nu_vary : bool
+        Whether to vary nu in the fit
+    p_c_vary : bool
+        Whether to vary p_c in the fit
+    
+    Returns:
+    --------
+    dict
+        Dictionary with implementation names as keys and bootstrap results as values
+    """
+    import numpy as np
+    
+    # Get unique implementations if not specified
+    if implementations is None:
+        implementations = df.index.get_level_values('implementation').unique()
+    
+    results = {}
+    
+    # Process each implementation
+    for impl in implementations:
+        print(f"\nPerforming bootstrap analysis for {impl.capitalize()} implementation:")
+        
+        # Filter data for this implementation
+        impl_df = df.xs(impl, level='implementation')
+        
+        # Perform bootstrap analysis
+        bootstrap_results = bootstrap_data_collapse(
+            df=impl_df,
+            n_samples=n_samples,
+            sample_size=sample_size,
+            p_c=p_c,
+            nu=nu,
+            L_min=L_min,
+            L_max=L_max,
+            p_range=p_range,
+            seed=seed,
+            nu_vary=nu_vary,
+            p_c_vary=p_c_vary
+        )
+        
+        results[impl] = bootstrap_results
+        
+        # Print results
+        print(f"  nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
+        print(f"  p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
+        print(f"  reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+    
+    return results
+
+def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.473, nu=0.7, L_min=None, L_max=None, p_range=None, seed=None, nu_vary=True, p_c_vary=True):
+    """
+    Perform bootstrapped data collapse analysis on TMI data.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with MultiIndex (p, L) containing TMI observations
+    n_samples : int
+        Number of bootstrap samples to generate
+    sample_size : int
+        Size of each bootstrap sample
+    p_c : float, optional
+        Initial guess for critical point
+    nu : float, optional
+        Initial guess for critical exponent
+    L_min : int, optional
+        Minimum system size to include
+    L_max : int, optional
+        Maximum system size to include
+    p_range : tuple, optional
+        (min, max) range of p values to include
+    seed : int, optional
+        Random seed for reproducibility
+    nu_vary : bool
+        Whether to vary nu in the fit
+    p_c_vary : bool
+        Whether to vary p_c in the fit
+    
+    Returns:
+    --------
+    dict
+        Contains:
+        - 'nu_mean': average critical exponent
+        - 'nu_std': standard deviation of critical exponent
+        - 'pc_mean': average critical point
+        - 'pc_std': standard deviation of critical point
+        - 'redchi_mean': average reduced chi-squared
+        - 'redchi_std': standard deviation of reduced chi-squared
+        - 'samples': list of individual sample results
+    """
+    import numpy as np
+    from FSS.DataCollapse import DataCollapse
+    
+    rng = np.random.default_rng(seed)
+    results = []
+    
+    # Default p_range if not provided
+    if p_range is None:
+        p_min = df.index.get_level_values('p').min()
+        p_max = df.index.get_level_values('p').max()
+        p_range = [p_min, p_max]
+    
+    # Perform bootstrap sampling
+    for i in range(n_samples):
+        # Create resampled DataFrame
+        resampled_data = []
+        
+        # Resample for each (p, L) pair
+        for idx in df.index:
+            p, L = idx
+            observations = df.loc[idx, 'observations']
+            
+            # Ensure observations is a list
+            if not isinstance(observations, list):
+                observations = [observations]
+            
+            # Random sampling with replacement
+            sampled_obs = rng.choice(observations, 
+                                   size=min(sample_size, len(observations)), 
+                                   replace=True)
+            
+            resampled_data.append({
+                'p': p,
+                'L': L,
+                'observations': list(sampled_obs)
+            })
+        
+        # Create new DataFrame from resampled data
+        resampled_df = pd.DataFrame(resampled_data)
+        resampled_df = resampled_df.set_index(['p', 'L'])
+        
+        # Perform data collapse
+        dc = DataCollapse(df=resampled_df, 
+                         p_='p', 
+                         L_='L',
+                         params={},
+                         p_range=p_range,
+                         Lmin=L_min,
+                         Lmax=L_max)
+        
+        res = dc.datacollapse(p_c=p_c, 
+                            nu=nu, 
+                            beta=0.0,
+                            p_c_vary=p_c_vary,
+                            nu_vary=nu_vary,
+                            beta_vary=False)
+        
+        # Add debugging information
+        if res.params['nu'].stderr is None:
+            print(f"Warning: Sample {i+1} - stderr is None")
+            print(f"Fit success: {res.success}")
+            print(f"Fit message: {res.message}")
+            
+        # Store results with fallback for None stderr values
+        results.append({
+            'nu': res.params['nu'].value,
+            'nu_stderr': res.params['nu'].stderr if res.params['nu'].stderr is not None else 0.0,
+            'pc': res.params['p_c'].value,
+            'pc_stderr': res.params['p_c'].stderr if res.params['p_c'].stderr is not None else 0.0,
+            'redchi': res.redchi
+        })
+    
+    # Calculate final results
+    nu_values = [r['nu'] for r in results]
+    pc_values = [r['pc'] for r in results]
+    redchi_values = [r['redchi'] for r in results]
+    
+    # Calculate mean values
+    nu_mean = np.mean(nu_values)
+    pc_mean = np.mean(pc_values)
+    redchi_mean = np.mean(redchi_values)
+    
+    # Calculate total uncertainties (combining bootstrap spread and fit uncertainties)
+    nu_std = np.sqrt(np.std(nu_values)**2 + np.mean([r['nu_stderr']**2 for r in results]))
+    pc_std = np.sqrt(np.std(pc_values)**2 + np.mean([r['pc_stderr']**2 for r in results]))
+    redchi_std = np.std(redchi_values)
+    
+    return {
+        'nu_mean': nu_mean,
+        'nu_std': nu_std,
+        'pc_mean': pc_mean,
+        'pc_std': pc_std,
+        'redchi_mean': redchi_mean,
+        'redchi_std': redchi_std,
+        'samples': results
+    }
+
 if __name__ == "__main__":
     # Example usage
     thresholds = [1.0e-15]
@@ -382,16 +699,39 @@ if __name__ == "__main__":
         thresholds=thresholds
     )
     
-    # Plot comparison
     if thresholds[0] in results:
+        # Plot comparison
         fig, ax = plot_tmi_comparison(
             results_dict=results,
             p_fixed=p_fixed,
             p_fixed_name=p_fixed_name,
             threshold=thresholds[0],
-            p_c=0.6,  # Example critical point
+            p_c=0.75,  # Example critical point
             save_fig=True
         )
+        
+        # Plot loss manifold comparison
+        fig_loss, axes_loss = plot_compare_loss_manifold(
+            df=results[thresholds[0]],
+            pc_range=(0.7, 0.8),
+            nu_range=(0.5, 1.5),
+            pc=0.75,
+            delta_p=0.05,
+            n_points=50,
+            L_min=12,
+            save_fig=True
+        )
+        
+        # Perform bootstrap analysis comparison
+        bootstrap_results = compare_bootstrap_analysis(
+            df=results[thresholds[0]],
+            n_samples=50,
+            sample_size=100,
+            p_c=0.75,
+            nu=0.7,
+            L_min=12
+        )
+        
         plt.show()
     else:
         print(f"No results found for threshold {thresholds[0]}")
