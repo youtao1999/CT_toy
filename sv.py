@@ -358,7 +358,12 @@ class MPIManager:
         # Define output directory - use min and max of p_range for naming
         p_min = min(self.p_scan_values)
         p_max = max(self.p_scan_values)
-        self.output_dir = f'sv_L{args.L}_{args.p_fixed_name}{args.p_fixed:.3f}_p{p_min:.3f}-{p_max:.3f}'
+        
+        # Set output directory based on comparison flag
+        if args.comparison:
+            self.output_dir = f"sv_comparison_L{args.L}_{args.p_fixed_name}{args.p_fixed:.3f}_p{p_min:.3f}-{p_max:.3f}"
+        else:
+            self.output_dir = f'sv_L{args.L}_{args.p_fixed_name}{args.p_fixed:.3f}_p{p_min:.3f}-{p_max:.3f}'
         
         # Create data manager
         self.data_manager = DataManager(self.output_dir, comparison=args.comparison)

@@ -5,6 +5,7 @@ import h5py
 import glob
 import matplotlib.pyplot as plt
 from plot_tmi_results import compute_tmi_from_singular_values
+from tqdm import tqdm  # Import tqdm for progress bars
 
 def write_tmi_compare_results_to_csv(df_final, p_fixed, p_fixed_name, current_threshold, output_filename=None):
     """
@@ -40,7 +41,7 @@ def write_tmi_compare_results_to_csv(df_final, p_fixed, p_fixed_name, current_th
                 'pproj': p if p_fixed_name == 'pctrl' else p_fixed,
                 'L': L,
                 'implementation': implementation,
-                'tmi': tmi_value
+                'observations': tmi_value  # Changed from 'tmi' to 'observations'
             })
     
     # Write to CSV
@@ -89,7 +90,8 @@ def read_and_compute_tmi_from_compare_file(filename, p_fixed_name, p_fixed, n, c
         if 'tao' in p_fixed_group:
             tao_sv_group = p_fixed_group['tao']['singular_values']
             
-            for p_scan_idx in range(len(p_scan_values)):
+            # Add progress bar for p_scan_values
+            for p_scan_idx in tqdm(range(len(p_scan_values)), desc="Processing Tao's implementation", leave=False):
                 num_samples = tao_sv_group[list(tao_sv_group.keys())[0]].shape[1]
                 
                 tao_singular_values = [{
@@ -111,7 +113,8 @@ def read_and_compute_tmi_from_compare_file(filename, p_fixed_name, p_fixed, n, c
         if 'haining' in p_fixed_group:
             haining_sv_group = p_fixed_group['haining']['singular_values']
             
-            for p_scan_idx in range(len(p_scan_values)):
+            # Add progress bar for p_scan_values
+            for p_scan_idx in tqdm(range(len(p_scan_values)), desc="Processing Haining's implementation", leave=False):
                 num_samples = haining_sv_group[list(haining_sv_group.keys())[0]].shape[1]
                 
                 haining_singular_values = [{
@@ -198,10 +201,14 @@ def read_tmi_compare_results(p_fixed, p_fixed_name, thresholds=None, L_values=No
                 df = df[df['L'].isin(L_values)]
             
             # Group by p, L, and implementation to collect all TMI values as observations
-            p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-            df['p'] = df[p_col]  # Create 'p' column
-            df_grouped = df.groupby(['p', 'L', 'implementation'])['tmi'].apply(list).reset_index()
-            df_final = df_grouped.rename(columns={'tmi': 'observations'}).set_index(['p', 'L', 'implementation'])
+            p_scan_name = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
+            df['p'] = df[p_scan_name]  # Create 'p' column
+            
+            # Group by p, L, and implementation and convert observations to lists
+            df_grouped = df.groupby(['p', 'L', 'implementation'])['observations'].apply(list).reset_index()
+            
+            # Set MultiIndex for compatibility with plotting functions
+            df_final = df_grouped.set_index(['p', 'L', 'implementation'])
             
             results_dict[threshold] = df_final
         else:
@@ -217,30 +224,40 @@ def read_tmi_compare_results(p_fixed, p_fixed_name, thresholds=None, L_values=No
         
         if compute in ['y', 'yes']:
             # Find all relevant HDF5 files
-            file_pattern = f'sv_comparison_L*_{p_fixed_name}{p_fixed:.3f}_pc*'
+            file_pattern = f'sv_comparison_L*_{p_fixed_name}{p_fixed:.3f}_p*'
             all_files = glob.glob(file_pattern)
-            print(all_files)
+            print(f"Found {len(all_files)} files matching pattern: {file_pattern}")
+
             if not all_files:
                 print(f"No HDF5 files found matching pattern: {file_pattern}")
                 return results_dict
-                
+            
             # Extract unique L values from filenames
             if L_values is None:
                 L_values = sorted(list(set([int(f.split('_L')[1].split('_')[0]) for f in all_files])))
-            p_c_values = sorted(list(set([float(f.split('_pc')[2]) for f in all_files])))
 
-            for threshold in missing_thresholds:
+            # Add progress bar for thresholds
+            for threshold in tqdm(missing_thresholds, desc="Processing thresholds"):
                 print(f"\nComputing for threshold {threshold:.1e}")
                 data_list = []
                 
-                for L in L_values:
-                    for p_c in p_c_values:
-                        # Process all files for this L value and fixed parameter
-                        filename = f'sv_comparison_L{L}_{p_fixed_name}{p_fixed:.3f}_pc{p_c:.3f}/final_results_L{L}.h5'
-                        file_results = read_and_compute_tmi_from_compare_file(
-                            filename, p_fixed_name, p_fixed, n, threshold
-                        )
-                        data_list.extend(file_results)
+                # Add progress bar for L values
+                for L in tqdm(L_values, desc=f"Processing L values for threshold {threshold:.1e}"):
+                    # Find all files for this L value
+                    L_files = [f for f in all_files if f'_L{L}_' in f]
+                    
+                    # Add progress bar for files
+                    for file_path in tqdm(L_files, desc=f"Processing files for L={L}", leave=False):
+
+                        # Process the file
+                        filename = os.path.join(file_path, f'final_results_L{L}.h5')
+                        if os.path.exists(filename):
+                            file_results = read_and_compute_tmi_from_compare_file(
+                                filename, p_fixed_name, p_fixed, n, threshold
+                            )
+                            data_list.extend(file_results)
+                        else:
+                            print(f"Warning: File {filename} not found!")
                 
                 if data_list:
                     # Create DataFrame and group observations
@@ -300,6 +317,14 @@ def plot_tmi_comparison(results_dict, p_fixed, p_fixed_name, threshold, L_values
         raise ValueError(f"Threshold {threshold} not found in results_dict")
     
     df = results_dict[threshold]
+    
+    # Ensure df has a MultiIndex with p, L, implementation
+    if not isinstance(df.index, pd.MultiIndex) or 'L' not in df.index.names:
+        # Try to convert to MultiIndex if possible
+        if 'p' in df.columns and 'L' in df.columns and 'implementation' in df.columns:
+            df = df.set_index(['p', 'L', 'implementation'])
+        else:
+            raise ValueError("Cannot plot: DataFrame does not have required columns (p, L, implementation)")
     
     # Filter by L values if provided
     if L_values is not None:
@@ -686,6 +711,182 @@ def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.473, nu=0.7, L_min
         'samples': results
     }
 
+def read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold, L_values=None):
+    """
+    Read TMI comparison results directly from CSV files.
+    
+    Parameters:
+    -----------
+    p_fixed : float
+        Fixed parameter value
+    p_fixed_name : str
+        Name of fixed parameter ('pproj' or 'pctrl')
+    threshold : float
+        Threshold value for TMI computation
+    L_values : list, optional
+        List of L values to include
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame with TMI results
+    """
+    # Join filename with directory name
+    filename = os.path.join('tmi_compare_results', f'tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold{threshold:.1e}.csv')
+    
+    if not os.path.exists(filename):
+        print(f"Warning: File {filename} not found!")
+        return None
+    
+    # Read CSV file
+    df = pd.read_csv(filename)
+    
+    # Filter by L values if provided
+    if L_values is not None:
+        df = df[df['L'].isin(L_values)]
+    
+    # Ensure 'observations' column exists (for backward compatibility)
+    if 'tmi' in df.columns and 'observations' not in df.columns:
+        df['observations'] = df['tmi']
+        df = df.drop('tmi', axis=1)
+    
+    return df
+
+def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold, 
+                                       n_samples=100, sample_size=1000, 
+                                       p_c=0.473, nu=0.7, L_min=None, L_max=None, 
+                                       p_range=None, seed=None, implementations=None,
+                                       nu_vary=True, p_c_vary=True):
+    """
+    Perform bootstrap analysis using data from CSV files.
+    
+    Parameters:
+    -----------
+    p_fixed : float
+        Fixed parameter value
+    p_fixed_name : str
+        Name of fixed parameter ('pproj' or 'pctrl')
+    threshold : float
+        Threshold value for TMI computation
+    n_samples : int
+        Number of bootstrap samples to generate
+    sample_size : int
+        Size of each bootstrap sample
+    p_c : float, optional
+        Initial guess for critical point
+    nu : float, optional
+        Initial guess for critical exponent
+    L_min : int, optional
+        Minimum system size to include
+    L_max : int, optional
+        Maximum system size to include
+    p_range : tuple, optional
+        (min, max) range of p values to include
+    seed : int, optional
+        Random seed for reproducibility
+    implementations : list, optional
+        List of implementations to compare (default: all in df)
+    nu_vary : bool
+        Whether to vary nu in the fit
+    p_c_vary : bool
+        Whether to vary p_c in the fit
+    
+    Returns:
+    --------
+    dict
+        Dictionary with implementation names as keys and bootstrap results as values
+    """
+    # Read data from CSV
+    df = read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold)
+    
+    if df is None:
+        print("No data available for analysis.")
+        return None
+    
+    # Check if 'observations' column exists
+    if 'observations' not in df.columns:
+        print("Error: CSV file does not contain 'observations' column with TMI values")
+        return None
+    
+    # Get unique implementations if not specified
+    if implementations is None:
+        implementations = df['implementation'].unique()
+    
+    results = {}
+    
+    # Process each implementation
+    for impl in implementations:
+        print(f"\nPerforming bootstrap analysis for {impl.capitalize()} implementation:")
+        
+        # Filter data for this implementation
+        impl_df = df[df['implementation'] == impl].copy()
+        
+        # Filter by L values if needed
+        if L_min is not None:
+            impl_df = impl_df[impl_df['L'] >= L_min]
+        if L_max is not None:
+            impl_df = impl_df[impl_df['L'] <= L_max]
+        
+        # Filter by p range if needed
+        if p_range is not None:
+            p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
+            impl_df = impl_df[(impl_df[p_col] >= p_range[0]) & (impl_df[p_col] <= p_range[1])]
+        
+        # Set up for DataCollapse
+        p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
+        impl_df['p'] = impl_df[p_col]  # Create 'p' column for DataCollapse
+        
+        # Convert observations column from string to list of floats if needed
+        if isinstance(impl_df['observations'].iloc[0], str):
+            impl_df['observations'] = impl_df['observations'].apply(
+                lambda x: [float(val) for val in x.strip('[]').split(',')]
+            )
+        
+        # Group by (p, L) and collect all observations for each group
+        grouped_data = []
+        for (p, L), group in impl_df.groupby(['p', 'L']):
+            # Combine all observations from this group
+            all_obs = []
+            for obs in group['observations']:
+                if isinstance(obs, list):
+                    all_obs.extend(obs)
+                else:
+                    all_obs.append(obs)
+            
+            grouped_data.append({
+                'p': p,
+                'L': L,
+                'observations': all_obs
+            })
+        
+        # Create new DataFrame for bootstrap analysis
+        bootstrap_df = pd.DataFrame(grouped_data)
+        bootstrap_df = bootstrap_df.set_index(['p', 'L'])
+        
+        # Perform bootstrap analysis
+        bootstrap_results = bootstrap_data_collapse(
+            df=bootstrap_df,
+            n_samples=n_samples,
+            sample_size=sample_size,
+            p_c=p_c,
+            nu=nu,
+            L_min=None,  # Already filtered
+            L_max=None,  # Already filtered
+            p_range=None,  # Already filtered
+            seed=seed,
+            nu_vary=nu_vary,
+            p_c_vary=p_c_vary
+        )
+        
+        results[impl] = bootstrap_results
+        
+        # Print results
+        print(f"  nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
+        print(f"  p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
+        print(f"  reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+    
+    return results
+
 if __name__ == "__main__":
     # Example usage
     thresholds = [1.0e-15]
@@ -723,8 +924,10 @@ if __name__ == "__main__":
         )
         
         # Perform bootstrap analysis comparison
-        bootstrap_results = compare_bootstrap_analysis(
-            df=results[thresholds[0]],
+        bootstrap_results = compare_bootstrap_analysis_from_csv(
+            p_fixed=p_fixed,
+            p_fixed_name=p_fixed_name,
+            threshold=thresholds[0],
             n_samples=50,
             sample_size=100,
             p_c=0.75,
