@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import numpy as np
+from FSS.DataCollapse import DataCollapse
 import h5py
 import glob
 import matplotlib.pyplot as plt
@@ -429,8 +430,6 @@ def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.473, de
     tuple
         (fig, axes) tuple
     """
-    import numpy as np
-    from FSS.DataCollapse import DataCollapse
     
     # Set p_range around pc
     p_range = [pc - delta_p, pc + delta_p]
@@ -756,7 +755,7 @@ def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
                                        n_samples=100, sample_size=1000, 
                                        p_c=0.473, nu=0.7, L_min=None, L_max=None, 
                                        p_range=None, seed=None, implementations=None,
-                                       nu_vary=True, p_c_vary=True):
+                                       nu_vary=True, p_c_vary=True, bootstrap=True):
     """
     Perform bootstrap analysis using data from CSV files.
     
@@ -790,11 +789,13 @@ def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
         Whether to vary nu in the fit
     p_c_vary : bool
         Whether to vary p_c in the fit
+    bootstrap : bool
+        Whether to perform bootstrap analysis (True) or just a single data collapse (False)
     
     Returns:
     --------
     dict
-        Dictionary with implementation names as keys and bootstrap results as values
+        Dictionary with implementation names as keys and results as values
     """
     # Read data from CSV
     df = read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold)
@@ -816,7 +817,7 @@ def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
     
     # Process each implementation
     for impl in implementations:
-        print(f"\nPerforming bootstrap analysis for {impl.capitalize()} implementation:")
+        print(f"\nPerforming {'bootstrap ' if bootstrap else ''}analysis for {impl.capitalize()} implementation:")
         
         # Filter data for this implementation
         impl_df = df[df['implementation'] == impl].copy()
@@ -827,17 +828,23 @@ def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
         if L_max is not None:
             impl_df = impl_df[impl_df['L'] <= L_max]
         
-        # Filter by p range if needed
-        if p_range is not None:
-            p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-            impl_df = impl_df[(impl_df[p_col] >= p_range[0]) & (impl_df[p_col] <= p_range[1])]
-        
         # Set up for DataCollapse
         p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
         impl_df['p'] = impl_df[p_col]  # Create 'p' column for DataCollapse
         
+        # Determine p_range if not provided
+        if p_range is None:
+            p_min = impl_df['p'].min()
+            p_max = impl_df['p'].max()
+            local_p_range = [p_min, p_max]
+        else:
+            local_p_range = p_range
+            
+            # Filter by p range if needed
+            impl_df = impl_df[(impl_df['p'] >= local_p_range[0]) & (impl_df['p'] <= local_p_range[1])]
+        
         # Convert observations column from string to list of floats if needed
-        if isinstance(impl_df['observations'].iloc[0], str):
+        if len(impl_df) > 0 and isinstance(impl_df['observations'].iloc[0], str):
             impl_df['observations'] = impl_df['observations'].apply(
                 lambda x: [float(val) for val in x.strip('[]').split(',')]
             )
@@ -859,31 +866,75 @@ def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
                 'observations': all_obs
             })
         
-        # Create new DataFrame for bootstrap analysis
-        bootstrap_df = pd.DataFrame(grouped_data)
-        bootstrap_df = bootstrap_df.set_index(['p', 'L'])
+        # Create new DataFrame for analysis
+        analysis_df = pd.DataFrame(grouped_data)
         
-        # Perform bootstrap analysis
-        bootstrap_results = bootstrap_data_collapse(
-            df=bootstrap_df,
-            n_samples=n_samples,
-            sample_size=sample_size,
-            p_c=p_c,
-            nu=nu,
-            L_min=None,  # Already filtered
-            L_max=None,  # Already filtered
-            p_range=None,  # Already filtered
-            seed=seed,
-            nu_vary=nu_vary,
-            p_c_vary=p_c_vary
-        )
+        # Check if we have enough data
+        if len(analysis_df) == 0:
+            print(f"  Warning: No data available for {impl} implementation after filtering")
+            continue
+            
+        analysis_df = analysis_df.set_index(['p', 'L'])
         
-        results[impl] = bootstrap_results
-        
-        # Print results
-        print(f"  nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
-        print(f"  p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
-        print(f"  reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+        if bootstrap:
+            # Perform bootstrap analysis
+            bootstrap_results = bootstrap_data_collapse(
+                df=analysis_df,
+                n_samples=n_samples,
+                sample_size=sample_size,
+                p_c=p_c,
+                nu=nu,
+                L_min=None,  # Already filtered
+                L_max=None,  # Already filtered
+                p_range=local_p_range,
+                seed=seed,
+                nu_vary=nu_vary,
+                p_c_vary=p_c_vary
+            )
+            
+            results[impl] = bootstrap_results
+            
+            # Print results
+            print(f"  nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
+            print(f"  p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
+            print(f"  reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+        else:
+            # Perform single data collapse on the entire dataset
+            try:
+                dc = DataCollapse(df=analysis_df, 
+                                p_='p', 
+                                L_='L',
+                                params={},
+                                p_range=local_p_range,
+                                Lmin=L_min,
+                                Lmax=L_max)
+                
+                res = dc.datacollapse(p_c=p_c, 
+                                    nu=nu, 
+                                    beta=0.0,
+                                    p_c_vary=p_c_vary,
+                                    nu_vary=nu_vary,
+                                    beta_vary=False)
+                
+                # Store results
+                single_results = {
+                    'nu': res.params['nu'].value,
+                    'nu_stderr': res.params['nu'].stderr if res.params['nu'].stderr is not None else 0.0,
+                    'pc': res.params['p_c'].value,
+                    'pc_stderr': res.params['p_c'].stderr if res.params['p_c'].stderr is not None else 0.0,
+                    'redchi': res.redchi,
+                    'result_object': res  # Store the full result object for further analysis if needed
+                }
+                
+                results[impl] = single_results
+                
+                # Print results
+                print(f"  nu = {single_results['nu']:.3f} ± {single_results['nu_stderr']:.3f}")
+                print(f"  p_c = {single_results['pc']:.3f} ± {single_results['pc_stderr']:.3f}")
+                print(f"  reduced chi^2 = {single_results['redchi']:.3f}")
+            except Exception as e:
+                print(f"  Error performing data collapse: {str(e)}")
+                continue
     
     return results
 
@@ -915,7 +966,7 @@ if __name__ == "__main__":
         fig_loss, axes_loss = plot_compare_loss_manifold(
             df=results[thresholds[0]],
             pc_range=(0.7, 0.8),
-            nu_range=(0.5, 1.5),
+            nu_range=(0.3, 1.5),
             pc=0.75,
             delta_p=0.05,
             n_points=50,
@@ -932,7 +983,8 @@ if __name__ == "__main__":
             sample_size=100,
             p_c=0.75,
             nu=0.7,
-            L_min=12
+            L_min=12,
+            bootstrap=False
         )
         
         plt.show()
