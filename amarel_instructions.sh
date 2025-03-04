@@ -16,7 +16,7 @@ scp -r ty296@amarel:/scratch/ty296/sv_comparison_L*_pctrl0.400_pc0.800 .
 nohup run_sv.sh 8 'pctrl' 0.4 "0.7:0.8:40" 2000 20 --comparison > run_sv_L8.log 2>&1 &
 nohup run_sv.sh 12 'pctrl' 0.4 "0.7:0.8:40" 2000 40 --comparison > run_sv_L12.log 2>&1 &
 nohup run_sv.sh 16 'pctrl' 0.4 "0.7:0.8:40" 2000 100 --comparison > run_sv_L16.log 2>&1 &
-nohup run_sv.sh 20 'pctrl' 0.4 "0.7:0.8:40" 2000 100 --comparison > run_sv_L20.log 2>&1 &
+nohup run_sv.sh 20 'pctrl' 0.4 "0.7:0.8:40" 2000 200 --comparison > run_sv_L20.log 2>&1 &
 
 scp -r ty296@amarel:/scratch/ty296/sv_L*_pctrl0.400_p0.700-0.800 .
 
