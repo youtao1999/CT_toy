@@ -395,7 +395,7 @@ def plot_tmi_comparison(results_dict, p_fixed, p_fixed_name, threshold, L_values
     
     return fig, ax
 
-def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.473, delta_p=0.05, L_min=12, 
+def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.5, delta_p=0.05, L_min=12, 
                               implementations=None, figsize=(15, 6), save_fig=True, output_dir=None):
     """
     Visualize and compare the loss function manifold for different implementations.
@@ -495,7 +495,7 @@ def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.473, de
     
     return fig, axes
 
-def compare_bootstrap_analysis(df, n_samples=100, sample_size=1000, p_c=0.473, nu=0.7, 
+def compare_bootstrap_analysis(df, n_samples=100, sample_size=1000, p_c=0.5, nu=1.33, 
                               L_min=None, L_max=None, p_range=None, seed=None, 
                               implementations=None, nu_vary=True, p_c_vary=True):
     """
@@ -572,7 +572,7 @@ def compare_bootstrap_analysis(df, n_samples=100, sample_size=1000, p_c=0.473, n
     
     return results
 
-def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.473, nu=0.7, L_min=None, L_max=None, p_range=None, seed=None, nu_vary=True, p_c_vary=True):
+def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.5, nu=1.33, L_min=None, L_max=None, p_range=None, seed=None, nu_vary=True, p_c_vary=True):
     """
     Perform bootstrapped data collapse analysis on TMI data.
     
@@ -753,7 +753,7 @@ def read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold, L_values
 
 def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold, 
                                        n_samples=100, sample_size=1000, 
-                                       p_c=0.473, nu=0.7, L_min=None, L_max=None, 
+                                       p_c=0.5, nu=1.33, L_min=None, L_max=None, 
                                        p_range=None, seed=None, implementations=None,
                                        nu_vary=True, p_c_vary=True, bootstrap=True):
     """
@@ -938,10 +938,301 @@ def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
     
     return results
 
+def plot_data_collapse(df, p_c, nu, beta=0, p_fixed=None, p_fixed_name=None, threshold=None, 
+                      implementation=None, L_min=None, L_max=None, p_range=None, 
+                      figsize=(10, 8), save_fig=True, output_dir=None, filename=None):
+    """
+    Plot and save the data collapse visualization for TMI data.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with MultiIndex (p, L) containing TMI observations
+    p_c : float
+        Critical point
+    nu : float
+        Critical exponent
+    beta : float, optional
+        Scaling dimension (usually 0 for TMI)
+    p_fixed : float, optional
+        Fixed parameter value (for filename)
+    p_fixed_name : str, optional
+        Name of fixed parameter ('pproj' or 'pctrl') (for filename)
+    threshold : float, optional
+        Threshold value used (for filename)
+    implementation : str, optional
+        Implementation name (for filename)
+    L_min : int, optional
+        Minimum system size to include
+    L_max : int, optional
+        Maximum system size to include
+    p_range : tuple, optional
+        (min, max) range of p values to include
+    figsize : tuple, optional
+        Figure size
+    save_fig : bool, optional
+        Whether to save the figure
+    output_dir : str, optional
+        Directory to save the figure
+    filename : str, optional
+        Custom filename for the saved figure
+        
+    Returns:
+    --------
+    tuple
+        (fig, axes) tuple containing the figure and its axes
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.colors import to_rgba
+    
+    # Filter by L values if needed
+    if L_min is not None or L_max is not None:
+        L_values = df.index.get_level_values('L')
+        mask = np.ones(len(df), dtype=bool)
+        if L_min is not None:
+            mask &= L_values >= L_min
+        if L_max is not None:
+            mask &= L_values <= L_max
+        df = df.loc[mask]
+    
+    # Filter by p range if needed
+    if p_range is not None:
+        p_values = df.index.get_level_values('p')
+        mask = (p_values >= p_range[0]) & (p_values <= p_range[1])
+        df = df.loc[mask]
+    
+    # Get unique L values and sort them
+    unique_L = sorted(df.index.get_level_values('L').unique())
+    
+    # Create figure with two subplots: raw data and collapsed data
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    
+    # Define colormap for L values
+    cmap = plt.cm.viridis
+    colors = [cmap(i / max(1, len(unique_L) - 1)) for i in range(len(unique_L))]
+    
+    # Plot raw data
+    for i, L in enumerate(unique_L):
+        L_data = df.loc[(slice(None), L), :]
+        p_values = L_data.index.get_level_values('p')
+        
+        # Calculate mean and standard error for each p value
+        means = []
+        errors = []
+        for idx in L_data.index:
+            obs = L_data.loc[idx, 'observations']
+            if isinstance(obs, list):
+                means.append(np.mean(obs))
+                errors.append(np.std(obs) / np.sqrt(len(obs)))
+            else:
+                means.append(obs)
+                errors.append(0)
+        
+        # Plot with error bars
+        axes[0].errorbar(p_values, means, yerr=errors, 
+                       marker='o', linestyle='-', color=colors[i], 
+                       label=f'L = {L}')
+    
+    # Add vertical line at p_c
+    axes[0].axvline(x=p_c, color='k', linestyle='--', alpha=0.7, label=f'p_c = {p_c:.3f}')
+    
+    # Set labels and title for raw data
+    axes[0].set_xlabel('p')
+    axes[0].set_ylabel('TMI')
+    axes[0].set_title('Raw TMI Data')
+    axes[0].legend(loc='best')
+    
+    # Plot collapsed data
+    for i, L in enumerate(unique_L):
+        L_data = df.loc[(slice(None), L), :]
+        p_values = L_data.index.get_level_values('p')
+        
+        # Calculate mean and standard error for each p value
+        means = []
+        errors = []
+        for idx in L_data.index:
+            obs = L_data.loc[idx, 'observations']
+            if isinstance(obs, list):
+                means.append(np.mean(obs))
+                errors.append(np.std(obs) / np.sqrt(len(obs)))
+            else:
+                means.append(obs)
+                errors.append(0)
+        
+        # Calculate scaled x and y values
+        x_scaled = (p_values - p_c) * L**(1/nu)
+        y_scaled = np.array(means) * L**beta
+        errors_scaled = np.array(errors) * L**beta
+        
+        # Plot with error bars
+        axes[1].errorbar(x_scaled, y_scaled, yerr=errors_scaled, 
+                       marker='o', linestyle='', color=colors[i], 
+                       label=f'L = {L}')
+    
+    # Set labels and title for collapsed data
+    axes[1].set_xlabel(r'$(p - p_c) L^{1/\nu}$')
+    axes[1].set_ylabel(r'$\mathrm{TMI} \cdot L^{\beta}$')
+    axes[1].set_title(f'Data Collapse (p_c = {p_c:.3f}, ν = {nu:.3f}, β = {beta:.3f})')
+    axes[1].legend(loc='best')
+    
+    # Add grid
+    axes[0].grid(alpha=0.3)
+    axes[1].grid(alpha=0.3)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save figure if requested
+    if save_fig:
+        if output_dir is None:
+            output_dir = 'tmi_compare_plots'
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate filename if not provided
+        if filename is None:
+            parts = []
+            if implementation:
+                parts.append(implementation)
+            if p_fixed is not None and p_fixed_name:
+                parts.append(f"{p_fixed_name}{p_fixed:.3f}")
+            if threshold is not None:
+                parts.append(f"threshold{threshold:.1e}")
+            
+            filename = f"data_collapse_{'_'.join(parts)}.png"
+        
+        fig_path = os.path.join(output_dir, filename)
+        plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+        print(f"Saved data collapse figure to {fig_path}")
+    
+    return fig, axes
+
+def save_data_collapse_from_csv(p_fixed, p_fixed_name, threshold, 
+                               p_c, nu, beta=0, L_min=None, L_max=None, 
+                               p_range=None, implementations=None,
+                               figsize=(10, 8), output_dir=None):
+    """
+    Create and save data collapse plots using data from CSV files.
+    
+    Parameters:
+    -----------
+    p_fixed : float
+        Fixed parameter value
+    p_fixed_name : str
+        Name of fixed parameter ('pproj' or 'pctrl')
+    threshold : float
+        Threshold value for TMI computation
+    p_c : float or dict
+        Critical point (can be a single value or a dict with implementation names as keys)
+    nu : float or dict
+        Critical exponent (can be a single value or a dict with implementation names as keys)
+    beta : float, optional
+        Scaling dimension (usually 0 for TMI)
+    L_min : int, optional
+        Minimum system size to include
+    L_max : int, optional
+        Maximum system size to include
+    p_range : tuple, optional
+        (min, max) range of p values to include
+    implementations : list, optional
+        List of implementations to process (default: all in the CSV)
+    figsize : tuple, optional
+        Figure size
+    output_dir : str, optional
+        Directory to save the figures
+        
+    Returns:
+    --------
+    dict
+        Dictionary with implementation names as keys and (fig, axes) tuples as values
+    """
+    # Read data from CSV
+    df = read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold)
+    
+    if df is None:
+        print("No data available for analysis.")
+        return None
+    
+    # Get unique implementations if not specified
+    if implementations is None:
+        implementations = df['implementation'].unique()
+    
+    results = {}
+    
+    # Process each implementation
+    for impl in implementations:
+        print(f"\nCreating data collapse plot for {impl.capitalize()} implementation:")
+        
+        # Filter data for this implementation
+        impl_df = df[df['implementation'] == impl].copy()
+        
+        # Set up for data collapse
+        p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
+        impl_df['p'] = impl_df[p_col]  # Create 'p' column for data collapse
+        
+        # Convert observations column from string to list of floats if needed
+        if len(impl_df) > 0 and isinstance(impl_df['observations'].iloc[0], str):
+            impl_df['observations'] = impl_df['observations'].apply(
+                lambda x: [float(val) for val in x.strip('[]').split(',')]
+            )
+        
+        # Group by (p, L) and collect all observations for each group
+        grouped_data = []
+        for (p, L), group in impl_df.groupby(['p', 'L']):
+            # Combine all observations from this group
+            all_obs = []
+            for obs in group['observations']:
+                if isinstance(obs, list):
+                    all_obs.extend(obs)
+                else:
+                    all_obs.append(obs)
+            
+            grouped_data.append({
+                'p': p,
+                'L': L,
+                'observations': all_obs
+            })
+        
+        # Create new DataFrame for analysis
+        analysis_df = pd.DataFrame(grouped_data)
+        
+        # Check if we have enough data
+        if len(analysis_df) == 0:
+            print(f"  Warning: No data available for {impl} implementation after filtering")
+            continue
+            
+        analysis_df = analysis_df.set_index(['p', 'L'])
+        
+        # Get p_c and nu values for this implementation
+        impl_p_c = p_c[impl] if isinstance(p_c, dict) else p_c
+        impl_nu = nu[impl] if isinstance(nu, dict) else nu
+        
+        # Create and save data collapse plot
+        fig, axes = plot_data_collapse(
+            df=analysis_df,
+            p_c=impl_p_c,
+            nu=impl_nu,
+            beta=beta,
+            p_fixed=p_fixed,
+            p_fixed_name=p_fixed_name,
+            threshold=threshold,
+            implementation=impl,
+            L_min=L_min,
+            L_max=L_max,
+            p_range=p_range,
+            figsize=figsize,
+            save_fig=True,
+            output_dir=output_dir
+        )
+        
+        results[impl] = (fig, axes)
+    
+    return results
+
 if __name__ == "__main__":
     # Example usage
     thresholds = [1.0e-15]
-    p_fixed = 0.4
+    p_fixed = 0.0
     p_fixed_name = 'pctrl'
     
     # Read or compute TMI values
@@ -958,16 +1249,16 @@ if __name__ == "__main__":
             p_fixed=p_fixed,
             p_fixed_name=p_fixed_name,
             threshold=thresholds[0],
-            p_c=0.75,  # Example critical point
+            p_c=0.5,  # Example critical point
             save_fig=True
         )
         
         # Plot loss manifold comparison
         fig_loss, axes_loss = plot_compare_loss_manifold(
             df=results[thresholds[0]],
-            pc_range=(0.7, 0.8),
+            pc_range=(0.45, 0.55),
             nu_range=(0.3, 1.5),
-            pc=0.75,
+            pc=0.5,
             delta_p=0.05,
             n_points=50,
             L_min=12,
@@ -981,11 +1272,28 @@ if __name__ == "__main__":
             threshold=thresholds[0],
             n_samples=50,
             sample_size=100,
-            p_c=0.75,
-            nu=0.7,
+            p_c=0.5,
+            nu=1.33,
             L_min=12,
             bootstrap=False
         )
+        
+        # Create and save data collapse plots
+        if bootstrap_results:
+            # Extract p_c and nu values from bootstrap results
+            p_c_dict = {impl: res['pc'] for impl, res in bootstrap_results.items()}
+            nu_dict = {impl: res['nu'] for impl, res in bootstrap_results.items()}
+            
+            # Create data collapse plots
+            data_collapse_results = save_data_collapse_from_csv(
+                p_fixed=p_fixed,
+                p_fixed_name=p_fixed_name,
+                threshold=thresholds[0],
+                p_c=p_c_dict,
+                nu=nu_dict,
+                L_min=12,
+                output_dir='tmi_compare_plots'
+            )
         
         plt.show()
     else:
