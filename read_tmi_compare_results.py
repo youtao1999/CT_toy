@@ -1261,7 +1261,7 @@ if __name__ == "__main__":
             pc=0.5,
             delta_p=0.05,
             n_points=50,
-            L_min=12,
+            L_min=8,
             save_fig=True
         )
         
