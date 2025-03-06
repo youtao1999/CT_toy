@@ -395,7 +395,7 @@ def plot_tmi_comparison(results_dict, p_fixed, p_fixed_name, threshold, L_values
     
     return fig, ax
 
-def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.5, delta_p=0.05, L_min=12, 
+def plot_compare_loss_manifold(df, p_range, nu_range, n_points=100, L_min=12, 
                               implementations=None, figsize=(15, 6), save_fig=True, output_dir=None):
     """
     Visualize and compare the loss function manifold for different implementations.
@@ -431,9 +431,6 @@ def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.5, delt
         (fig, axes) tuple
     """
     
-    # Set p_range around pc
-    p_range = [pc - delta_p, pc + delta_p]
-    
     # Get unique implementations if not specified
     if implementations is None:
         implementations = df.index.get_level_values('implementation').unique()
@@ -444,9 +441,9 @@ def plot_compare_loss_manifold(df, pc_range, nu_range, n_points=50, pc=0.5, delt
         axes = [axes]  # Make axes indexable for single implementation
     
     # Create meshgrid of pc and nu values
-    pc_vals = np.linspace(pc_range[0], pc_range[1], n_points)
+    p_vals = np.linspace(p_range[0], p_range[1], n_points)
     nu_vals = np.linspace(nu_range[0], nu_range[1], n_points)
-    PC, NU = np.meshgrid(pc_vals, nu_vals)
+    PC, NU = np.meshgrid(p_vals, nu_vals)
     
     # Process each implementation
     for i, impl in enumerate(implementations):
@@ -533,8 +530,6 @@ def compare_bootstrap_analysis(df, n_samples=100, sample_size=1000, p_c=0.5, nu=
     dict
         Dictionary with implementation names as keys and bootstrap results as values
     """
-    import numpy as np
-    
     # Get unique implementations if not specified
     if implementations is None:
         implementations = df.index.get_level_values('implementation').unique()
@@ -613,7 +608,6 @@ def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.5, nu=1.33, L_min=
         - 'redchi_std': standard deviation of reduced chi-squared
         - 'samples': list of individual sample results
     """
-    import numpy as np
     from FSS.DataCollapse import DataCollapse
     
     rng = np.random.default_rng(seed)
@@ -751,8 +745,7 @@ def read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold, L_values
     
     return df
 
-def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold, 
-                                       n_samples=100, sample_size=1000, 
+def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
                                        p_c=0.5, nu=1.33, L_min=None, L_max=None, 
                                        p_range=None, seed=None, implementations=None,
                                        nu_vary=True, p_c_vary=True, bootstrap=True):
@@ -877,6 +870,9 @@ def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
         analysis_df = analysis_df.set_index(['p', 'L'])
         
         if bootstrap:
+            # Prompt for bootstrap parameters if not provided
+            n_samples = int(input("Enter number of bootstrap samples (default 100): ") or 100)
+            sample_size = int(input("Enter size of each bootstrap sample (default 1000): ") or 1000)
             # Perform bootstrap analysis
             bootstrap_results = bootstrap_data_collapse(
                 df=analysis_df,
@@ -1234,12 +1230,15 @@ if __name__ == "__main__":
     thresholds = [1.0e-15]
     p_fixed = 0.0
     p_fixed_name = 'pctrl'
+    L_min = 8
+    p_c = 0.5
+    nu = 1.33
     
     # Read or compute TMI values
     results = read_tmi_compare_results(
         p_fixed=p_fixed, 
         p_fixed_name=p_fixed_name, 
-        thresholds=thresholds
+        thresholds=thresholds,
     )
     
     if thresholds[0] in results:
@@ -1249,19 +1248,17 @@ if __name__ == "__main__":
             p_fixed=p_fixed,
             p_fixed_name=p_fixed_name,
             threshold=thresholds[0],
-            p_c=0.5,  # Example critical point
+            p_c=p_c,  # Example critical point
             save_fig=True
         )
         
         # Plot loss manifold comparison
         fig_loss, axes_loss = plot_compare_loss_manifold(
             df=results[thresholds[0]],
-            pc_range=(0.45, 0.55),
+            p_range=(0.45, 0.55),
             nu_range=(0.3, 1.5),
-            pc=0.5,
-            delta_p=0.05,
             n_points=50,
-            L_min=8,
+            L_min=L_min,
             save_fig=True
         )
         
@@ -1270,19 +1267,30 @@ if __name__ == "__main__":
             p_fixed=p_fixed,
             p_fixed_name=p_fixed_name,
             threshold=thresholds[0],
-            n_samples=50,
-            sample_size=100,
             p_c=0.5,
             nu=1.33,
-            L_min=12,
-            bootstrap=False
+            L_min=L_min,
+            bootstrap=True,
+            nu_vary=True,
+            p_c_vary=True
         )
         
         # Create and save data collapse plots
         if bootstrap_results:
-            # Extract p_c and nu values from bootstrap results
-            p_c_dict = {impl: res['pc'] for impl, res in bootstrap_results.items()}
-            nu_dict = {impl: res['nu'] for impl, res in bootstrap_results.items()}
+            
+            # Check if bootstrap was used and extract p_c and nu values accordingly
+            bootstrap_mode = bootstrap_results[list(bootstrap_results.keys())[0]].get('nu_mean') is not None
+            
+            if bootstrap_mode:
+                # Extract p_c and nu values from bootstrap results (bootstrap=True case)
+                p_c_dict = {impl: res['pc_mean'] for impl, res in bootstrap_results.items()}
+                nu_dict = {impl: res['nu_mean'] for impl, res in bootstrap_results.items()}
+                print("Using bootstrap mean values for data collapse")
+            else:
+                # Extract p_c and nu values from single fit results (bootstrap=False case)
+                p_c_dict = {impl: res['pc'] for impl, res in bootstrap_results.items()}
+                nu_dict = {impl: res['nu'] for impl, res in bootstrap_results.items()}
+                print("Using single fit values for data collapse")
             
             # Create data collapse plots
             data_collapse_results = save_data_collapse_from_csv(
@@ -1291,7 +1299,7 @@ if __name__ == "__main__":
                 threshold=thresholds[0],
                 p_c=p_c_dict,
                 nu=nu_dict,
-                L_min=12,
+                L_min=L_min,
                 output_dir='tmi_compare_plots'
             )
         
