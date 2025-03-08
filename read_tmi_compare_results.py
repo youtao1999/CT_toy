@@ -6,650 +6,401 @@ import h5py
 import glob
 import matplotlib.pyplot as plt
 from plot_tmi_results import compute_tmi_from_singular_values
-from tqdm import tqdm  # Import tqdm for progress bars
+from tqdm import tqdm
 
-def write_tmi_compare_results_to_csv(df_final, p_fixed, p_fixed_name, current_threshold, output_filename=None):
+class TMIAnalyzer:
     """
-    Write TMI comparison results to a CSV file.
+    A class to analyze Tripartite Mutual Information (TMI) data.
     
-    Parameters:
-    -----------
-    df_final : pd.DataFrame
-        DataFrame with MultiIndex (p, L, implementation) containing TMI observations
-    p_fixed : float
-        Fixed parameter value
-    p_fixed_name : str
-        Name of fixed parameter ('pproj' or 'pctrl')
-    current_threshold : float
-        Current threshold value for TMI computation
-    output_filename : str, optional
-        Custom output filename
-    
-    Returns:
-    --------
-    str
-        Name of the output file
+    This class encapsulates functionality for reading, analyzing, and visualizing TMI data,
+    including data collapse analysis and bootstrap analysis.
     """
-    if output_filename is None:
-        output_filename = f'tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold{current_threshold:.1e}.csv'
     
-    # Prepare data for CSV
-    csv_data = []
-    for (p, L, implementation), row in df_final.iterrows():
-        for tmi_value in row['observations']:
-            csv_data.append({
-                'pctrl': p if p_fixed_name == 'pproj' else p_fixed,
-                'pproj': p if p_fixed_name == 'pctrl' else p_fixed,
-                'L': L,
-                'implementation': implementation,
-                'observations': tmi_value  # Changed from 'tmi' to 'observations'
-            })
-    
-    # Write to CSV
-    pd.DataFrame(csv_data).to_csv(output_filename, index=False)
-    print(f"Wrote results to {output_filename}")
-    return output_filename
-
-def read_and_compute_tmi_from_compare_file(filename, p_fixed_name, p_fixed, n, current_threshold):
-    """
-    Read singular values from a comparison HDF5 file and compute TMI values for both implementations.
-    
-    Parameters:
-    -----------
-    filename : str
-        Path to the HDF5 file
-    p_fixed_name : str
-        Name of fixed parameter ('pproj' or 'pctrl')
-    p_fixed : float
-        Fixed parameter value
-    n : int
-        Renyi entropy parameter
-    current_threshold : float
-        Threshold for singular values
+    def __init__(self, pc_guess, nu_guess, p_fixed, p_fixed_name, threshold=1.0e-15, output_folder="tmi_compare_results"):
+        """
+        Initialize TMIAnalyzer with basic parameters.
         
-    Returns:
-    --------
-    list
-        List of dictionaries with TMI data
-    """
-    if not os.path.exists(filename):
-        print(f"Warning: File {filename} not found!")
-        return []
-    
-    data_list = []
-    
-    with h5py.File(filename, 'r') as f:
-        p_fixed_key = f"{p_fixed_name}{p_fixed:.3f}"
-        p_fixed_group = f[p_fixed_key]
-        p_scan_name = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-        p_scan_values = p_fixed_group[p_scan_name][:]
+        Parameters:
+        -----------
+        p_fixed : float
+            Fixed parameter value
+        p_fixed_name : str
+            Name of fixed parameter ('pproj' or 'pctrl')
+        threshold : float
+            Threshold value for TMI computation
+        output_folder : str
+            Folder to store output files
+        """
+        self.pc_guess = pc_guess
+        self.nu_guess = nu_guess
+        self.p_fixed = p_fixed
+        self.p_fixed_name = p_fixed_name
+        self.threshold = threshold
+        self.output_folder = output_folder
+        self.unscaled_df= None
+        self.scaled_df= None
+        # Ensure output folder exists
+        os.makedirs(output_folder, exist_ok=True)
         
-        # Get L value from filename
-        L = int(filename.split('_L')[-1].split('.')[0])
+        # Set working directory to CT_toy if needed
+        self._set_working_directory()
+    
+    def _set_working_directory(self):
+        """Set the working directory to CT_toy."""
+        current_dir = os.getcwd()
         
-        # Process Tao's implementation
-        if 'tao' in p_fixed_group:
-            tao_sv_group = p_fixed_group['tao']['singular_values']
+        # If already in CT_toy, no need to change
+        if os.path.basename(current_dir) == 'CT_toy':
+            return
             
-            # Add progress bar for p_scan_values
-            for p_scan_idx in tqdm(range(len(p_scan_values)), desc="Processing Tao's implementation", leave=False):
-                num_samples = tao_sv_group[list(tao_sv_group.keys())[0]].shape[1]
+        # Try different possible locations
+        possible_paths = [
+            os.path.join(current_dir, 'CT_toy'),
+            os.path.join(current_dir, 'code', 'CT_toy'),
+            '/home/youtao/CT_toy'  # Absolute path as fallback
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                os.chdir(path)
+                print(f"Changed working directory to: {path}")
+                return
                 
-                tao_singular_values = [{
-                    key: tao_sv_group[key][p_scan_idx, sample_idx] 
-                    for key in tao_sv_group.keys()
-                } for sample_idx in range(num_samples)]
-                
-                tao_tmi_values = [compute_tmi_from_singular_values(sv, n, current_threshold) 
-                                for sv in tao_singular_values]
-                
-                data_list.append({
-                    'p': p_scan_values[p_scan_idx],
-                    'L': L,
-                    'implementation': 'tao',
-                    'observations': tao_tmi_values
-                })
-        
-        # Process Haining's implementation
-        if 'haining' in p_fixed_group:
-            haining_sv_group = p_fixed_group['haining']['singular_values']
-            
-            # Add progress bar for p_scan_values
-            for p_scan_idx in tqdm(range(len(p_scan_values)), desc="Processing Haining's implementation", leave=False):
-                num_samples = haining_sv_group[list(haining_sv_group.keys())[0]].shape[1]
-                
-                haining_singular_values = [{
-                    key: haining_sv_group[key][p_scan_idx, sample_idx] 
-                    for key in haining_sv_group.keys()
-                } for sample_idx in range(num_samples)]
-                
-                haining_tmi_values = [compute_tmi_from_singular_values(sv, n, current_threshold) 
-                                    for sv in haining_singular_values]
-                
-                data_list.append({
-                    'p': p_scan_values[p_scan_idx],
-                    'L': L,
-                    'implementation': 'haining',
-                    'observations': haining_tmi_values
-                })
+        raise RuntimeError(f"Could not find CT_toy directory. Searched in: {possible_paths}")
     
-    return data_list
-
-def read_tmi_compare_results(p_fixed, p_fixed_name, thresholds=None, L_values=None, n=0, output_folder="tmi_compare_results"):
-    """
-    Read TMI comparison results, combining existing CSV data and optionally computing missing data.
-    
-    Parameters:
-    -----------
-    p_fixed : float
-        Fixed parameter value
-    p_fixed_name : str
-        Name of fixed parameter ('pproj' or 'pctrl')
-    thresholds : list, optional
-        List of threshold values for TMI computation
-    L_values : list, optional
-        List of L values to include
-    n : int, optional
-        Renyi entropy parameter
-    output_folder : str, optional
-        Folder to store output files
-        
-    Returns:
-    --------
-    dict
-        Dictionary with threshold values as keys and DataFrames as values
-    """
-    # Ensure we're in the correct directory
-    current_dir = os.getcwd()
-    if os.path.basename(current_dir) != 'CT_toy':
-        if os.path.exists('code/CT_toy'):
-            os.chdir('code/CT_toy')
-        elif os.path.exists('CT_toy'):
-            os.chdir('CT_toy')
-        else:
-            raise RuntimeError("Could not find CT_toy directory")
-    
-    results_dict = {}
-    missing_thresholds = []
-
-    # Check if output folder exists, if not, create it
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-    os.chdir(output_folder)
-
-    # Check if we are in the correct directory
-    if os.path.basename(os.getcwd()) != output_folder:
-        raise RuntimeError(f"Could not find {output_folder} directory")
-    
-    # Determine thresholds to process
-    if thresholds is None:
-        def extract_threshold(filename):
-            """Extract threshold value from filename."""
-            return float(filename.split('_threshold')[1].split('.csv')[0])
-
-        file_pattern = f'tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
-        all_files = glob.glob(file_pattern)
-        thresholds = [extract_threshold(f) for f in all_files]
-    
-    # Check existing CSV files for each threshold
-    for threshold in thresholds:
-        filename = f'tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold{threshold:.1e}.csv'
-        if os.path.exists(filename):
-            print(f"Found existing data for threshold {threshold:.1e}")
-            # Read and process CSV file
-            df = pd.read_csv(filename)
-            if L_values is not None:
-                df = df[df['L'].isin(L_values)]
-            
-            # Group by p, L, and implementation to collect all TMI values as observations
-            p_scan_name = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-            df['p'] = df[p_scan_name]  # Create 'p' column
-            
-            # Group by p, L, and implementation and convert observations to lists
-            df_grouped = df.groupby(['p', 'L', 'implementation'])['observations'].apply(list).reset_index()
-            
-            # Set MultiIndex for compatibility with plotting functions
-            df_final = df_grouped.set_index(['p', 'L', 'implementation'])
-            
-            results_dict[threshold] = df_final
-        else:
-            missing_thresholds.append(threshold)
-    
-    if missing_thresholds:
-        # Change directory back to CT_toy
-        os.chdir(current_dir)
-
-        print(f"\nMissing data for {len(missing_thresholds)} threshold values:")
-        print(f"Thresholds: {[f'{t:.1e}' for t in missing_thresholds]}")
-        compute = input("\nWould you like to compute these from H5 files? (yes/no): ").lower().strip()
-        
-        if compute in ['y', 'yes']:
-            # Find all relevant HDF5 files
-            file_pattern = f'sv_comparison_L*_{p_fixed_name}{p_fixed:.3f}_p*'
-            all_files = glob.glob(file_pattern)
-            print(f"Found {len(all_files)} files matching pattern: {file_pattern}")
-
-            if not all_files:
-                print(f"No HDF5 files found matching pattern: {file_pattern}")
-                return results_dict
-            
-            # Extract unique L values from filenames
-            if L_values is None:
-                L_values = sorted(list(set([int(f.split('_L')[1].split('_')[0]) for f in all_files])))
-
-            # Add progress bar for thresholds
-            for threshold in tqdm(missing_thresholds, desc="Processing thresholds"):
-                print(f"\nComputing for threshold {threshold:.1e}")
-                data_list = []
-                
-                # Add progress bar for L values
-                for L in tqdm(L_values, desc=f"Processing L values for threshold {threshold:.1e}"):
-                    # Find all files for this L value
-                    L_files = [f for f in all_files if f'_L{L}_' in f]
-                    
-                    # Add progress bar for files
-                    for file_path in tqdm(L_files, desc=f"Processing files for L={L}", leave=False):
-
-                        # Process the file
-                        filename = os.path.join(file_path, f'final_results_L{L}.h5')
-                        if os.path.exists(filename):
-                            file_results = read_and_compute_tmi_from_compare_file(
-                                filename, p_fixed_name, p_fixed, n, threshold
-                            )
-                            data_list.extend(file_results)
-                        else:
-                            print(f"Warning: File {filename} not found!")
-                
-                if data_list:
-                    # Create DataFrame and group observations
-                    df = pd.DataFrame(data_list)
-                    df_final = df.set_index(['p', 'L', 'implementation'])
-                    
-                    # Change directory to the result output directory
-                    os.chdir(output_folder)
-                    # Write results to CSV
-                    write_tmi_compare_results_to_csv(df_final, p_fixed, p_fixed_name, threshold)
-                    # Change back to the original directory
-                    os.chdir(current_dir)
-                    results_dict[threshold] = df_final
-        else:
-            print("Skipping computation for missing thresholds.")
-
-    # Make sure we are in the original directory
-    if os.path.basename(os.getcwd()) != current_dir:
-        os.chdir(current_dir)
-
-    return results_dict
-
-def plot_tmi_comparison(results_dict, p_fixed, p_fixed_name, threshold, L_values=None, p_c=None, 
-                        ylim=None, figsize=(10, 6), save_fig=True, output_dir=None):
-    """
-    Plot TMI comparison between Tao's and Haining's implementations.
-    
-    Parameters:
-    -----------
-    results_dict : dict
-        Dictionary with threshold values as keys and DataFrames as values
-    p_fixed : float
-        Fixed parameter value
-    p_fixed_name : str
-        Name of fixed parameter ('pproj' or 'pctrl')
-    threshold : float
-        Threshold value to plot
-    L_values : list, optional
-        List of L values to include
-    p_c : float, optional
-        Critical point to mark with vertical line
-    ylim : tuple, optional
-        Y-axis limits
-    figsize : tuple, optional
-        Figure size
-    save_fig : bool, optional
-        Whether to save the figure
-    output_dir : str, optional
-        Directory to save the figure
-        
-    Returns:
-    --------
-    tuple
-        (fig, ax) tuple
-    """
-    if threshold not in results_dict:
-        raise ValueError(f"Threshold {threshold} not found in results_dict")
-    
-    df = results_dict[threshold]
-    
-    # Ensure df has a MultiIndex with p, L, implementation
-    if not isinstance(df.index, pd.MultiIndex) or 'L' not in df.index.names:
-        # Try to convert to MultiIndex if possible
-        if 'p' in df.columns and 'L' in df.columns and 'implementation' in df.columns:
-            df = df.set_index(['p', 'L', 'implementation'])
-        else:
-            raise ValueError("Cannot plot: DataFrame does not have required columns (p, L, implementation)")
-    
-    # Filter by L values if provided
-    if L_values is not None:
-        df = df.loc[df.index.get_level_values('L').isin(L_values)]
-    
-    # Get unique L values and sort them
-    unique_L = sorted(df.index.get_level_values('L').unique())
-    
-    # Create figure
-    fig, ax = plt.subplots(figsize=figsize)
-    
-    # Define markers and colors
-    markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*']
-    colors_tao = plt.cm.Blues(np.linspace(0.5, 1.0, len(unique_L)))
-    colors_haining = plt.cm.Reds(np.linspace(0.5, 1.0, len(unique_L)))
-    
-    # Plot data for each L value
-    for i, L in enumerate(unique_L):
-        # Get data for Tao's implementation
-        tao_data = df.loc[(slice(None), L, 'tao'), :]
-        p_values = tao_data.index.get_level_values('p')
-        tao_means = [np.mean(obs) for obs in tao_data['observations']]
-        tao_stds = [np.std(obs) / np.sqrt(len(obs)) for obs in tao_data['observations']]
-        
-        # Get data for Haining's implementation
-        haining_data = df.loc[(slice(None), L, 'haining'), :]
-        haining_means = [np.mean(obs) for obs in haining_data['observations']]
-        haining_stds = [np.std(obs) / np.sqrt(len(obs)) for obs in haining_data['observations']]
-        
-        # Plot with error bars
-        ax.errorbar(p_values, tao_means, yerr=tao_stds, 
-                   marker=markers[i % len(markers)], linestyle='-', 
-                   color=colors_tao[i], label=f'Tao L={L}')
-        
-        ax.errorbar(p_values, haining_means, yerr=haining_stds, 
-                   marker=markers[i % len(markers)], linestyle='--', 
-                   color=colors_haining[i], label=f'Haining L={L}')
-    
-    # Add critical point line if provided
-    if p_c is not None:
-        ax.axvline(x=p_c, color='k', linestyle='--', alpha=0.5, label=f'p_c = {p_c:.3f}')
-    
-    # Set axis labels and title
-    p_scan_name = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-    ax.set_xlabel(f'{p_scan_name}')
-    ax.set_ylabel('Tripartite Mutual Information (TMI)')
-    ax.set_title(f'TMI Comparison ({p_fixed_name}={p_fixed:.3f}, threshold={threshold:.1e})')
-    
-    # Set y-axis limits if provided
-    if ylim is not None:
-        ax.set_ylim(ylim)
-    
-    # Add legend
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    
-    # Adjust layout
-    plt.tight_layout()
-    
-    # Save figure if requested
-    if save_fig:
-        if output_dir is None:
-            output_dir = 'tmi_compare_plots'
-        os.makedirs(output_dir, exist_ok=True)
-        fig_path = os.path.join(output_dir, f'tmi_compare_{p_fixed_name}{p_fixed:.3f}_threshold{threshold:.1e}.png')
-        plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-        print(f"Saved figure to {fig_path}")
-    
-    return fig, ax
-
-def plot_compare_loss_manifold(df, p_range, nu_range, n_points=100, L_min=12, 
-                              implementations=None, figsize=(15, 6), save_fig=True, output_dir=None):
-    """
-    Visualize and compare the loss function manifold for different implementations.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame with MultiIndex (p, L, implementation) containing TMI observations
-    pc_range : tuple
-        (min_pc, max_pc) range to explore
-    nu_range : tuple
-        (min_nu, max_nu) range to explore
-    n_points : int
-        Number of points to sample in each dimension
-    pc : float
-        Center point for p_range
-    delta_p : float
-        Range around pc to include in analysis
-    L_min : int
-        Minimum system size to include
-    implementations : list, optional
-        List of implementations to compare (default: all in df)
-    figsize : tuple
-        Figure size
-    save_fig : bool
-        Whether to save the figure
-    output_dir : str, optional
-        Directory to save the figure
-        
-    Returns:
-    --------
-    tuple
-        (fig, axes) tuple
-    """
-    
-    # Get unique implementations if not specified
-    if implementations is None:
-        implementations = df.index.get_level_values('implementation').unique()
-    
-    # Create figure with subplots for each implementation
-    fig, axes = plt.subplots(len(implementations), 2, figsize=figsize)
-    if len(implementations) == 1:
-        axes = [axes]  # Make axes indexable for single implementation
-    
-    # Create meshgrid of pc and nu values
-    p_vals = np.linspace(p_range[0], p_range[1], n_points)
-    nu_vals = np.linspace(nu_range[0], nu_range[1], n_points)
-    PC, NU = np.meshgrid(p_vals, nu_vals)
-    
-    # Process each implementation
-    for i, impl in enumerate(implementations):
-        # Filter data for this implementation
-        impl_df = df.xs(impl, level='implementation')
-        
-        # Create a DataCollapse object
-        dc = DataCollapse(impl_df, 
-                         p_='p', 
-                         L_='L',
-                         params={},
-                         p_range=p_range,
-                         Lmin=L_min)
-        
-        # Calculate loss for each point
-        Z = np.zeros_like(PC)
-        for j in range(n_points):
-            for k in range(n_points):
-                loss_vals = dc.loss(PC[j,k], NU[j,k], beta=0)
-                Z[j,k] = np.sum(loss_vals**2) / (len(loss_vals) - 2)
-        
-        # Contour plot
-        cont = axes[i][0].contour(PC, NU, Z, levels=20)
-        axes[i][0].clabel(cont, inline=True, fontsize=8)
-        axes[i][0].set_xlabel('p_c')
-        axes[i][0].set_ylabel('nu')
-        axes[i][0].set_title(f'{impl.capitalize()} Implementation - Loss Contours')
-        
-        # Color map plot
-        surf = axes[i][1].pcolormesh(PC, NU, np.log10(Z), shading='auto')
-        axes[i][1].set_xlabel('p_c')
-        axes[i][1].set_ylabel('nu')
-        axes[i][1].set_title(f'{impl.capitalize()} Implementation - Log10 Loss')
-        plt.colorbar(surf, ax=axes[i][1])
-    
-    plt.tight_layout()
-    
-    # Save figure if requested
-    if save_fig:
-        if output_dir is None:
-            output_dir = 'tmi_compare_plots'
-        os.makedirs(output_dir, exist_ok=True)
-        fig_path = os.path.join(output_dir, f'loss_manifold_comparison.png')
-        plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-        print(f"Saved figure to {fig_path}")
-    
-    return fig, axes
-
-def compare_bootstrap_analysis(df, n_samples=100, sample_size=1000, p_c=0.5, nu=1.33, 
-                              L_min=None, L_max=None, p_range=None, seed=None, 
-                              implementations=None, nu_vary=True, p_c_vary=True):
-    """
-    Perform and compare bootstrapped data collapse analysis for different implementations.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame with MultiIndex (p, L, implementation) containing TMI observations
-    n_samples : int
-        Number of bootstrap samples to generate
-    sample_size : int
-        Size of each bootstrap sample
-    p_c : float
-        Initial guess for critical point
-    nu : float
-        Initial guess for critical exponent
-    L_min : int, optional
-        Minimum system size to include
-    L_max : int, optional
-        Maximum system size to include
-    p_range : tuple, optional
-        (min, max) range of p values to include
-    seed : int, optional
-        Random seed for reproducibility
-    implementations : list, optional
-        List of implementations to compare (default: all in df)
-    nu_vary : bool
-        Whether to vary nu in the fit
-    p_c_vary : bool
-        Whether to vary p_c in the fit
-    
-    Returns:
-    --------
-    dict
-        Dictionary with implementation names as keys and bootstrap results as values
-    """
-    # Get unique implementations if not specified
-    if implementations is None:
-        implementations = df.index.get_level_values('implementation').unique()
-    
-    results = {}
-    
-    # Process each implementation
-    for impl in implementations:
-        print(f"\nPerforming bootstrap analysis for {impl.capitalize()} implementation:")
-        
-        # Filter data for this implementation
-        impl_df = df.xs(impl, level='implementation')
-        
-        # Perform bootstrap analysis
-        bootstrap_results = bootstrap_data_collapse(
-            df=impl_df,
-            n_samples=n_samples,
-            sample_size=sample_size,
-            p_c=p_c,
-            nu=nu,
-            L_min=L_min,
-            L_max=L_max,
-            p_range=p_range,
-            seed=seed,
-            nu_vary=nu_vary,
-            p_c_vary=p_c_vary
+    def _get_csv_filename(self):
+        """Get the standard CSV filename for the current parameters."""
+        return os.path.join(
+            self.output_folder,
+            f'tmi_compare_results_{self.p_fixed_name}{self.p_fixed:.3f}_threshold{self.threshold:.1e}.csv'
         )
+    
+    def read_from_csv(self, L_values=None):
+        """
+        Read TMI comparison results from CSV file.
         
-        results[impl] = bootstrap_results
+        Parameters:
+        -----------
+        L_values : list, optional
+            List of L values to include
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            DataFrame with TMI results
+        """
+        filename = self._get_csv_filename()
         
-        # Print results
-        print(f"  nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
-        print(f"  p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
-        print(f"  reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
-    
-    return results
-
-def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.5, nu=1.33, L_min=None, L_max=None, p_range=None, seed=None, nu_vary=True, p_c_vary=True):
-    """
-    Perform bootstrapped data collapse analysis on TMI data.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame with MultiIndex (p, L) containing TMI observations
-    n_samples : int
-        Number of bootstrap samples to generate
-    sample_size : int
-        Size of each bootstrap sample
-    p_c : float, optional
-        Initial guess for critical point
-    nu : float, optional
-        Initial guess for critical exponent
-    L_min : int, optional
-        Minimum system size to include
-    L_max : int, optional
-        Maximum system size to include
-    p_range : tuple, optional
-        (min, max) range of p values to include
-    seed : int, optional
-        Random seed for reproducibility
-    nu_vary : bool
-        Whether to vary nu in the fit
-    p_c_vary : bool
-        Whether to vary p_c in the fit
-    
-    Returns:
-    --------
-    dict
-        Contains:
-        - 'nu_mean': average critical exponent
-        - 'nu_std': standard deviation of critical exponent
-        - 'pc_mean': average critical point
-        - 'pc_std': standard deviation of critical point
-        - 'redchi_mean': average reduced chi-squared
-        - 'redchi_std': standard deviation of reduced chi-squared
-        - 'samples': list of individual sample results
-    """
-    from FSS.DataCollapse import DataCollapse
-    
-    rng = np.random.default_rng(seed)
-    results = []
-    
-    # Default p_range if not provided
-    if p_range is None:
-        p_min = df.index.get_level_values('p').min()
-        p_max = df.index.get_level_values('p').max()
-        p_range = [p_min, p_max]
-    
-    # Perform bootstrap sampling
-    for i in range(n_samples):
-        # Create resampled DataFrame
-        resampled_data = []
+        if not os.path.exists(filename):
+            print(f"Warning: File {filename} not found!")
+            return None
         
-        # Resample for each (p, L) pair
-        for idx in df.index:
-            p, L = idx
-            observations = df.loc[idx, 'observations']
-            
-            # Ensure observations is a list
-            if not isinstance(observations, list):
-                observations = [observations]
-            
-            # Random sampling with replacement
-            sampled_obs = rng.choice(observations, 
-                                   size=min(sample_size, len(observations)), 
-                                   replace=True)
-            
-            resampled_data.append({
+        df = pd.read_csv(filename)
+        
+        if L_values is None:
+            L_values = df['L'].unique()
+        else:
+            df = df[df['L'].isin(L_values)]
+        
+        # Ensure 'observations' column exists
+        if 'tmi' in df.columns and 'observations' not in df.columns:
+            df['observations'] = df['tmi']
+            df = df.drop('tmi', axis=1)
+        
+        # Group by p, L, and implementation to collect all TMI values as observations
+        p_scan_name = 'pctrl' if self.p_fixed_name == 'pproj' else 'pproj'
+        df['p'] = df[p_scan_name]  # Create 'p' column
+        
+        # Group observations by p, L, and implementation
+        grouped_data = []
+        for (p, L, impl), group in df.groupby(['p', 'L', 'implementation']):
+            grouped_data.append({
                 'p': p,
                 'L': L,
-                'observations': list(sampled_obs)
+                'implementation': impl,
+                'observations': group['observations'].tolist()
             })
         
-        # Create new DataFrame from resampled data
-        resampled_df = pd.DataFrame(resampled_data)
-        resampled_df = resampled_df.set_index(['p', 'L'])
+        # Create new DataFrame with MultiIndex
+        df_final = pd.DataFrame(grouped_data)
+        df_final = df_final.set_index(['p', 'L', 'implementation'])
         
-        # Perform data collapse
-        dc = DataCollapse(df=resampled_df, 
+        self.unscaled_df = df_final
+        return df_final
+    
+    def read_and_compute_from_h5(self, n=0, L_values=None):
+        """
+        Read and compute TMI values from H5 files.
+        
+        Parameters:
+        -----------
+        n : int
+            Renyi entropy parameter
+        L_values : list, optional
+            List of L values to include
+            
+        Returns:
+        --------
+        pandas.DataFrame
+            DataFrame with computed TMI values
+        """
+        # Find all relevant HDF5 files
+        file_pattern = f'sv_comparison_L*_{self.p_fixed_name}{self.p_fixed:.3f}_p*'
+        all_files = glob.glob(file_pattern)
+        
+        if not all_files:
+            print(f"No HDF5 files found matching pattern: {file_pattern}")
+            return None
+        
+        # Extract unique L values from filenames if not provided
+        if L_values is None:
+            L_values = sorted(list(set([int(f.split('_L')[1].split('_')[0]) for f in all_files])))
+        
+        data_list = []
+        for L in tqdm(L_values, desc="Processing L values"):
+            L_files = [f for f in all_files if f'_L{L}_' in f]
+            
+            for file_path in tqdm(L_files, desc=f"Processing files for L={L}", leave=False):
+                filename = os.path.join(file_path, f'final_results_L{L}.h5')
+                if os.path.exists(filename):
+                    file_results = self._read_single_h5_file(filename, n, L)
+                    data_list.extend(file_results)
+        
+        if data_list:
+            df = pd.DataFrame(data_list)
+            df_final = df.set_index(['p', 'L', 'implementation'])
+            self.unscaled_df = df_final
+            
+            # Save to CSV
+            self.save_to_csv()
+            
+            return df_final
+        return None
+    
+    def _read_single_h5_file(self, filename, n, L):
+        """Read and process a single H5 file."""
+        data_list = []
+        
+        with h5py.File(filename, 'r') as f:
+            p_fixed_key = f"{self.p_fixed_name}{self.p_fixed:.3f}"
+            p_fixed_group = f[p_fixed_key]
+            p_scan_name = 'pctrl' if self.p_fixed_name == 'pproj' else 'pproj'
+            p_scan_values = p_fixed_group[p_scan_name][:]
+            
+            for impl in ['tao', 'haining']:
+                if impl in p_fixed_group:
+                    sv_group = p_fixed_group[impl]['singular_values']
+                    
+                    for p_scan_idx in range(len(p_scan_values)):
+                        num_samples = sv_group[list(sv_group.keys())[0]].shape[1]
+                        
+                        singular_values = [{
+                            key: sv_group[key][p_scan_idx, sample_idx] 
+                            for key in sv_group.keys()
+                        } for sample_idx in range(num_samples)]
+                        
+                        tmi_values = [compute_tmi_from_singular_values(sv, n, self.threshold) 
+                                    for sv in singular_values]
+                        
+                        data_list.append({
+                            'p': p_scan_values[p_scan_idx],
+                            'L': L,
+                            'implementation': impl,
+                            'observations': tmi_values
+                        })
+        
+        return data_list
+    
+    def save_to_csv(self):
+        """Save current results to CSV file."""
+        if self.unscaled_df is None:
+            print("No results to save!")
+            return
+        
+        csv_data = []
+        for (p, L, implementation), row in self.unscaled_df.iterrows():
+            for tmi_value in row['observations']:
+                csv_data.append({
+                    'pctrl': p if self.p_fixed_name == 'pproj' else self.p_fixed,
+                    'pproj': p if self.p_fixed_name == 'pctrl' else self.p_fixed,
+                    'L': L,
+                    'implementation': implementation,
+                    'observations': tmi_value
+                })
+        
+        filename = self._get_csv_filename()
+        pd.DataFrame(csv_data).to_csv(filename, index=False)
+        print(f"Wrote results to {filename}")
+    
+    def plot_comparison(self, L_values=None, ylim=None, figsize=(15, 10), beta=0):
+        """
+        Plot comparison between unscaled raw data and scaled data based on data collapse.
+        
+        Parameters:
+        -----------
+        L_values : list, optional
+            List of L values to include
+        ylim : tuple, optional
+            Y-axis limits as (raw_ylim, scaled_ylim)
+        figsize : tuple
+            Figure size
+        beta : float
+            Scaling dimension (usually 0 for TMI)
+            
+        Returns:
+        --------
+        tuple
+            (fig, axes) tuple
+        """
+        if self.unscaled_df is None:
+            print("No data available for plotting!")
+            return None
+        
+        df = self.unscaled_df
+        
+        # Filter by L values if needed
+        if L_values is not None:
+            df = df.loc[df.index.get_level_values('L').isin(L_values)]
+        
+        # Get unique implementations and L values
+        implementations = df.index.get_level_values('implementation').unique()
+        unique_L = sorted(df.index.get_level_values('L').unique())
+        
+        # Create figure with subplots: one row per implementation, two columns (raw and scaled)
+        fig, axes = plt.subplots(len(implementations), 2, figsize=figsize)
+        
+        # Define markers and colors
+        markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*']
+        colors = plt.cm.viridis(np.linspace(0, 1, len(unique_L)))
+        
+        # Process each implementation
+        for i, impl in enumerate(implementations):
+            # Get axes for this implementation
+            if len(implementations) == 1:
+                ax_raw = axes[0]
+                ax_scaled = axes[1]
+            else:
+                ax_raw = axes[i, 0]
+                ax_scaled = axes[i, 1]
+            
+            # Filter data for this implementation
+            impl_df = df.xs(impl, level='implementation')
+            
+            # Plot raw and scaled data for each L
+            for j, L in enumerate(unique_L):
+                L_data = impl_df.loc[(slice(None), L), :]
+                p_values = L_data.index.get_level_values('p')
+                
+                # Calculate statistics
+                means = [np.mean(obs) for obs in L_data['observations']]
+                errors = [np.std(obs) / np.sqrt(len(obs)) for obs in L_data['observations']]
+                
+                # Raw data plot
+                ax_raw.errorbar(p_values, means, yerr=errors,
+                              marker=markers[j % len(markers)], 
+                              linestyle='-',
+                              color=colors[j],
+                              label=f'L = {L}')
+                
+                # Scaled data plot
+                x_scaled = (p_values - self.pc_guess) * L**(1/self.nu_guess)
+                y_scaled = np.array(means) * L**beta
+                errors_scaled = np.array(errors) * L**beta
+                
+                ax_scaled.errorbar(x_scaled, y_scaled, yerr=errors_scaled,
+                                 marker=markers[j % len(markers)], 
+                                 linestyle='',
+                                 color=colors[j],
+                                 label=f'L = {L}')
+            
+            # Add vertical line at p_c in raw data plot
+            ax_raw.axvline(x=self.pc_guess, color='k', linestyle='--', alpha=0.7,
+                         label=f'p_c = {self.pc_guess:.3f}')
+            
+            # Set labels and titles
+            ax_raw.set_xlabel('p')
+            ax_raw.set_ylabel('TMI')
+            ax_raw.set_title(f'Raw TMI Data - {impl.capitalize()}')
+            ax_raw.legend(loc='best')
+            ax_raw.grid(alpha=0.3)
+            
+            ax_scaled.set_xlabel(r'$(p - p_c) L^{1/\nu}$')
+            ax_scaled.set_ylabel(r'$\mathrm{TMI} \cdot L^{\beta}$')
+            ax_scaled.set_title(f'Scaled Data (p_c = {self.pc_guess:.3f}, ν = {self.nu_guess:.3f})')
+            ax_scaled.legend(loc='best')
+            ax_scaled.grid(alpha=0.3)
+            
+            # Set y-axis limits if provided
+            if ylim is not None:
+                if isinstance(ylim, tuple) and len(ylim) == 2:
+                    ax_raw.set_ylim(ylim[0])
+                    ax_scaled.set_ylim(ylim[1])
+                else:
+                    ax_raw.set_ylim(ylim)
+                    ax_scaled.set_ylim(ylim)
+        
+        plt.tight_layout()
+        
+        # Note: We don't save this figure as it uses initial guesses rather than fitted parameters
+        
+        return fig, axes
+    
+    def perform_data_collapse(self, implementation, beta=0, L_min=None, L_max=None, p_range=None, 
+                              nu_vary=True, p_c_vary=True):
+        """
+        Perform data collapse analysis for a specific implementation.
+        
+        Parameters:
+        -----------
+        implementation : str
+            Name of the implementation to analyze
+        beta : float
+            Scaling dimension
+        L_min : int, optional
+            Minimum system size
+        L_max : int, optional
+            Maximum system size
+        p_range : tuple, optional
+            (min, max) range of p values
+        nu_vary : bool
+            Whether to vary nu in the fit
+        p_c_vary : bool
+            Whether to vary p_c in the fit
+            
+        Returns:
+        --------
+        tuple
+            (fig, axes, result) containing the data collapse plots and fit result
+        """
+        if self.unscaled_df is None:
+            print("No data available for analysis!")
+            return None
+        
+        # Filter data for the specified implementation
+        df = self.unscaled_df.xs(implementation, level='implementation')
+        
+        # Apply filters
+        if L_min is not None or L_max is not None:
+            L_values = df.index.get_level_values('L')
+            mask = np.ones(len(df), dtype=bool)
+            if L_min is not None:
+                mask &= L_values >= L_min
+            if L_max is not None:
+                mask &= L_values <= L_max
+            df = df.loc[mask]
+        
+        if p_range is None:
+            p_min = df.index.get_level_values('p').min()
+            p_max = df.index.get_level_values('p').max()
+            p_range = [p_min, p_max]
+        else:
+            # Filter by p range
+            p_values = df.index.get_level_values('p')
+            mask = (p_values >= p_range[0]) & (p_values <= p_range[1])
+            df = df.loc[mask]
+        
+        # Perform data collapse fit
+        dc = DataCollapse(df=df, 
                          p_='p', 
                          L_='L',
                          params={},
@@ -657,652 +408,612 @@ def bootstrap_data_collapse(df, n_samples, sample_size, p_c=0.5, nu=1.33, L_min=
                          Lmin=L_min,
                          Lmax=L_max)
         
-        res = dc.datacollapse(p_c=p_c, 
-                            nu=nu, 
-                            beta=0.0,
-                            p_c_vary=p_c_vary,
-                            nu_vary=nu_vary,
-                            beta_vary=False)
-        
-        # Add debugging information
-        if res.params['nu'].stderr is None:
-            print(f"Warning: Sample {i+1} - stderr is None")
-            print(f"Fit success: {res.success}")
-            print(f"Fit message: {res.message}")
+        try:
+            result = dc.datacollapse(p_c=self.pc_guess, 
+                                   nu=self.nu_guess, 
+                                   beta=beta,
+                                   p_c_vary=p_c_vary,
+                                   nu_vary=nu_vary,
+                                   beta_vary=False)
             
-        # Store results with fallback for None stderr values
-        results.append({
-            'nu': res.params['nu'].value,
-            'nu_stderr': res.params['nu'].stderr if res.params['nu'].stderr is not None else 0.0,
-            'pc': res.params['p_c'].value,
-            'pc_stderr': res.params['p_c'].stderr if res.params['p_c'].stderr is not None else 0.0,
-            'redchi': res.redchi
-        })
-    
-    # Calculate final results
-    nu_values = [r['nu'] for r in results]
-    pc_values = [r['pc'] for r in results]
-    redchi_values = [r['redchi'] for r in results]
-    
-    # Calculate mean values
-    nu_mean = np.mean(nu_values)
-    pc_mean = np.mean(pc_values)
-    redchi_mean = np.mean(redchi_values)
-    
-    # Calculate total uncertainties (combining bootstrap spread and fit uncertainties)
-    nu_std = np.sqrt(np.std(nu_values)**2 + np.mean([r['nu_stderr']**2 for r in results]))
-    pc_std = np.sqrt(np.std(pc_values)**2 + np.mean([r['pc_stderr']**2 for r in results]))
-    redchi_std = np.std(redchi_values)
-    
-    return {
-        'nu_mean': nu_mean,
-        'nu_std': nu_std,
-        'pc_mean': pc_mean,
-        'pc_std': pc_std,
-        'redchi_mean': redchi_mean,
-        'redchi_std': redchi_std,
-        'samples': results
-    }
-
-def read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold, L_values=None):
-    """
-    Read TMI comparison results directly from CSV files.
-    
-    Parameters:
-    -----------
-    p_fixed : float
-        Fixed parameter value
-    p_fixed_name : str
-        Name of fixed parameter ('pproj' or 'pctrl')
-    threshold : float
-        Threshold value for TMI computation
-    L_values : list, optional
-        List of L values to include
-        
-    Returns:
-    --------
-    pandas.DataFrame
-        DataFrame with TMI results
-    """
-    # Join filename with directory name
-    filename = os.path.join('tmi_compare_results', f'tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold{threshold:.1e}.csv')
-    
-    if not os.path.exists(filename):
-        print(f"Warning: File {filename} not found!")
-        return None
-    
-    # Read CSV file
-    df = pd.read_csv(filename)
-    
-    # Filter by L values if provided
-    if L_values is not None:
-        df = df[df['L'].isin(L_values)]
-    
-    # Ensure 'observations' column exists (for backward compatibility)
-    if 'tmi' in df.columns and 'observations' not in df.columns:
-        df['observations'] = df['tmi']
-        df = df.drop('tmi', axis=1)
-    
-    return df
-
-def compare_bootstrap_analysis_from_csv(p_fixed, p_fixed_name, threshold,
-                                       p_c=0.5, nu=1.33, L_min=None, L_max=None, 
-                                       p_range=None, seed=None, implementations=None,
-                                       nu_vary=True, p_c_vary=True, bootstrap=True):
-    """
-    Perform bootstrap analysis using data from CSV files.
-    
-    Parameters:
-    -----------
-    p_fixed : float
-        Fixed parameter value
-    p_fixed_name : str
-        Name of fixed parameter ('pproj' or 'pctrl')
-    threshold : float
-        Threshold value for TMI computation
-    n_samples : int
-        Number of bootstrap samples to generate
-    sample_size : int
-        Size of each bootstrap sample
-    p_c : float, optional
-        Initial guess for critical point
-    nu : float, optional
-        Initial guess for critical exponent
-    L_min : int, optional
-        Minimum system size to include
-    L_max : int, optional
-        Maximum system size to include
-    p_range : tuple, optional
-        (min, max) range of p values to include
-    seed : int, optional
-        Random seed for reproducibility
-    implementations : list, optional
-        List of implementations to compare (default: all in df)
-    nu_vary : bool
-        Whether to vary nu in the fit
-    p_c_vary : bool
-        Whether to vary p_c in the fit
-    bootstrap : bool
-        Whether to perform bootstrap analysis (True) or just a single data collapse (False)
-    
-    Returns:
-    --------
-    dict
-        Dictionary with implementation names as keys and results as values
-    """
-    # Read data from CSV
-    df = read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold)
-    
-    if df is None:
-        print("No data available for analysis.")
-        return None
-    
-    # Check if 'observations' column exists
-    if 'observations' not in df.columns:
-        print("Error: CSV file does not contain 'observations' column with TMI values")
-        return None
-    
-    # Get unique implementations if not specified
-    if implementations is None:
-        implementations = df['implementation'].unique()
-    
-    results = {}
-    
-    # Process each implementation
-    for impl in implementations:
-        print(f"\nPerforming {'bootstrap ' if bootstrap else ''}analysis for {impl.capitalize()} implementation:")
-        
-        # Filter data for this implementation
-        impl_df = df[df['implementation'] == impl].copy()
-        
-        # Filter by L values if needed
-        if L_min is not None:
-            impl_df = impl_df[impl_df['L'] >= L_min]
-        if L_max is not None:
-            impl_df = impl_df[impl_df['L'] <= L_max]
-        
-        # Set up for DataCollapse
-        p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-        impl_df['p'] = impl_df[p_col]  # Create 'p' column for DataCollapse
-        
-        # Determine p_range if not provided
-        if p_range is None:
-            p_min = impl_df['p'].min()
-            p_max = impl_df['p'].max()
-            local_p_range = [p_min, p_max]
-        else:
-            local_p_range = p_range
-            
-            # Filter by p range if needed
-            impl_df = impl_df[(impl_df['p'] >= local_p_range[0]) & (impl_df['p'] <= local_p_range[1])]
-        
-        # Convert observations column from string to list of floats if needed
-        if len(impl_df) > 0 and isinstance(impl_df['observations'].iloc[0], str):
-            impl_df['observations'] = impl_df['observations'].apply(
-                lambda x: [float(val) for val in x.strip('[]').split(',')]
-            )
-        
-        # Group by (p, L) and collect all observations for each group
-        grouped_data = []
-        for (p, L), group in impl_df.groupby(['p', 'L']):
-            # Combine all observations from this group
-            all_obs = []
-            for obs in group['observations']:
-                if isinstance(obs, list):
-                    all_obs.extend(obs)
-                else:
-                    all_obs.append(obs)
-            
-            grouped_data.append({
-                'p': p,
-                'L': L,
-                'observations': all_obs
-            })
-        
-        # Create new DataFrame for analysis
-        analysis_df = pd.DataFrame(grouped_data)
-        
-        # Check if we have enough data
-        if len(analysis_df) == 0:
-            print(f"  Warning: No data available for {impl} implementation after filtering")
-            continue
-            
-        analysis_df = analysis_df.set_index(['p', 'L'])
-        
-        if bootstrap:
-            # Prompt for bootstrap parameters if not provided
-            n_samples = int(input("Enter number of bootstrap samples (default 100): ") or 100)
-            sample_size = int(input("Enter size of each bootstrap sample (default 1000): ") or 1000)
-            # Perform bootstrap analysis
-            bootstrap_results = bootstrap_data_collapse(
-                df=analysis_df,
-                n_samples=n_samples,
-                sample_size=sample_size,
-                p_c=p_c,
-                nu=nu,
-                L_min=None,  # Already filtered
-                L_max=None,  # Already filtered
-                p_range=local_p_range,
-                seed=seed,
-                nu_vary=nu_vary,
-                p_c_vary=p_c_vary
-            )
-            
-            results[impl] = bootstrap_results
+            # Extract fitted parameters
+            fitted_pc = result.params['p_c'].value
+            fitted_pc_err = result.params['p_c'].stderr if result.params['p_c'].stderr is not None else 0
+            fitted_nu = result.params['nu'].value
+            fitted_nu_err = result.params['nu'].stderr if result.params['nu'].stderr is not None else 0
             
             # Print results
-            print(f"  nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
-            print(f"  p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
-            print(f"  reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
-        else:
-            # Perform single data collapse on the entire dataset
-            try:
-                dc = DataCollapse(df=analysis_df, 
-                                p_='p', 
-                                L_='L',
-                                params={},
-                                p_range=local_p_range,
-                                Lmin=L_min,
-                                Lmax=L_max)
+            print(f"\nData Collapse Results for {implementation.capitalize()}:")
+            print(f"  p_c = {fitted_pc:.5f} ± {fitted_pc_err:.5f}")
+            print(f"  nu = {fitted_nu:.5f} ± {fitted_nu_err:.5f}")
+            print(f"  reduced chi^2 = {result.redchi:.5f}")
+            print(f"  Degrees of freedom: {result.nfree}")
+            
+            # Create figure with two subplots
+            fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+            
+            # Get unique L values and colors
+            unique_L = sorted(df.index.get_level_values('L').unique())
+            colors = plt.cm.viridis(np.linspace(0, 1, len(unique_L)))
+            
+            # Plot raw and collapsed data
+            for i, L in enumerate(unique_L):
+                L_data = df.loc[(slice(None), L), :]
+                p_values = L_data.index.get_level_values('p')
                 
-                res = dc.datacollapse(p_c=p_c, 
-                                    nu=nu, 
+                # Calculate statistics
+                means = [np.mean(obs) for obs in L_data['observations']]
+                errors = [np.std(obs) / np.sqrt(len(obs)) for obs in L_data['observations']]
+                
+                # Raw data plot
+                axes[0].errorbar(p_values, means, yerr=errors,
+                               marker='o', linestyle='-', color=colors[i],
+                               label=f'L = {L}')
+                
+                # Collapsed data plot using fitted parameters
+                x_scaled = (p_values - fitted_pc) * L**(1/fitted_nu)
+                y_scaled = np.array(means) * L**beta
+                errors_scaled = np.array(errors) * L**beta
+                
+                axes[1].errorbar(x_scaled, y_scaled, yerr=errors_scaled,
+                               marker='o', linestyle='', color=colors[i],
+                               label=f'L = {L}')
+            
+            # Add vertical line at p_c in raw data plot
+            axes[0].axvline(x=fitted_pc, color='k', linestyle='--', alpha=0.7,
+                           label=f'p_c = {fitted_pc:.3f}')
+            
+            # Set labels and titles
+            axes[0].set_xlabel('p')
+            axes[0].set_ylabel('TMI')
+            axes[0].set_title(f'Raw TMI Data - {implementation.capitalize()}')
+            axes[0].legend(loc='best')
+            axes[0].grid(alpha=0.3)
+            
+            axes[1].set_xlabel(r'$(p - p_c) L^{1/\nu}$')
+            axes[1].set_ylabel(r'$\mathrm{TMI} \cdot L^{\beta}$')
+            axes[1].set_title(f'Data Collapse (p_c = {fitted_pc:.3f}, ν = {fitted_nu:.3f}, β = {beta:.3f})')
+            axes[1].legend(loc='best')
+            axes[1].grid(alpha=0.3)
+            
+            plt.tight_layout()
+            
+            # Save figure
+            fig_path = os.path.join(
+                self.output_folder,
+                f'data_collapse_{implementation}_{self.p_fixed_name}{self.p_fixed:.3f}_threshold{self.threshold:.1e}.png'
+            )
+            plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+            print(f"Saved data collapse figure to {fig_path}")
+            
+            return fig, axes, result
+            
+        except Exception as e:
+            print(f"Error performing data collapse for {implementation}: {str(e)}")
+            return None
+    
+    def bootstrap_data_collapse(self, implementation, n_samples=100, sample_size=1000, 
+                               L_min=None, L_max=None, 
+                               p_range=None, seed=None, nu_vary=True, p_c_vary=True):
+        """
+        Perform bootstrapped data collapse analysis on TMI data for a specific implementation.
+        
+        Parameters:
+        -----------
+        implementation : str
+            Name of the implementation to analyze
+        n_samples : int
+            Number of bootstrap samples to generate
+        sample_size : int
+            Size of each bootstrap sample
+        L_min : int, optional
+            Minimum system size to include
+        L_max : int, optional
+            Maximum system size to include
+        p_range : tuple, optional
+            (min, max) range of p values to include
+        seed : int, optional
+            Random seed for reproducibility
+        nu_vary : bool
+            Whether to vary nu in the fit
+        p_c_vary : bool
+            Whether to vary p_c in the fit
+        
+        Returns:
+        --------
+        dict
+            Contains:
+            - 'nu_mean': average critical exponent
+            - 'nu_std': standard deviation of critical exponent
+            - 'pc_mean': average critical point
+            - 'pc_std': standard deviation of critical point
+            - 'redchi_mean': average reduced chi-squared
+            - 'redchi_std': standard deviation of reduced chi-squared
+            - 'samples': list of individual sample results
+        """
+        if self.unscaled_df is None:
+            print("No data available for analysis!")
+            return None
+            
+        # Filter data for the specified implementation
+        df = self.unscaled_df.xs(implementation, level='implementation')
+        
+        # Apply filters
+        if L_min is not None or L_max is not None:
+            L_values = df.index.get_level_values('L')
+            mask = np.ones(len(df), dtype=bool)
+            if L_min is not None:
+                mask &= L_values >= L_min
+            if L_max is not None:
+                mask &= L_values <= L_max
+            df = df.loc[mask]
+        
+        if p_range is None:
+            p_min = df.index.get_level_values('p').min()
+            p_max = df.index.get_level_values('p').max()
+            p_range = [p_min, p_max]
+        else:
+            # Filter by p range
+            p_values = df.index.get_level_values('p')
+            mask = (p_values >= p_range[0]) & (p_values <= p_range[1])
+            df = df.loc[mask]
+        
+        # Set up random number generator
+        rng = np.random.default_rng(seed)
+        results = []
+        
+        # Perform bootstrap sampling
+        for i in tqdm(range(n_samples), desc=f"Bootstrap samples for {implementation}"):
+            # Create resampled DataFrame
+            resampled_data = []
+            
+            # Resample for each (p, L) pair
+            for idx in df.index:
+                p, L = idx
+                observations = df.loc[idx, 'observations']
+                
+                # Ensure observations is a list
+                if not isinstance(observations, list):
+                    observations = [observations]
+                
+                # Random sampling with replacement
+                sampled_obs = rng.choice(observations, 
+                                       size=min(sample_size, len(observations)), 
+                                       replace=True)
+                
+                resampled_data.append({
+                    'p': p,
+                    'L': L,
+                    'observations': list(sampled_obs)
+                })
+            
+            # Create new DataFrame from resampled data
+            resampled_df = pd.DataFrame(resampled_data)
+            resampled_df = resampled_df.set_index(['p', 'L'])
+            
+            # Perform data collapse
+            dc = DataCollapse(df=resampled_df, 
+                             p_='p', 
+                             L_='L',
+                             params={},
+                             p_range=p_range,
+                             Lmin=L_min,
+                             Lmax=L_max)
+            
+            try:
+                res = dc.datacollapse(p_c=self.pc_guess, 
+                                    nu=self.nu_guess, 
                                     beta=0.0,
                                     p_c_vary=p_c_vary,
                                     nu_vary=nu_vary,
                                     beta_vary=False)
                 
-                # Store results
-                single_results = {
+                # Store results with fallback for None stderr values
+                results.append({
                     'nu': res.params['nu'].value,
                     'nu_stderr': res.params['nu'].stderr if res.params['nu'].stderr is not None else 0.0,
                     'pc': res.params['p_c'].value,
                     'pc_stderr': res.params['p_c'].stderr if res.params['p_c'].stderr is not None else 0.0,
-                    'redchi': res.redchi,
-                    'result_object': res  # Store the full result object for further analysis if needed
-                }
-                
-                results[impl] = single_results
+                    'redchi': res.redchi
+                })
+            except Exception as e:
+                print(f"Warning: Bootstrap sample {i+1} failed with error: {str(e)}")
+                continue
+        
+        if not results:
+            print(f"Error: All bootstrap samples failed for {implementation}")
+            return None
+            
+        # Calculate final results
+        nu_values = [r['nu'] for r in results]
+        pc_values = [r['pc'] for r in results]
+        redchi_values = [r['redchi'] for r in results]
+        
+        # Calculate mean values
+        nu_mean = np.mean(nu_values)
+        pc_mean = np.mean(pc_values)
+        redchi_mean = np.mean(redchi_values)
+        
+        # Calculate total uncertainties (combining bootstrap spread and fit uncertainties)
+        nu_std = np.sqrt(np.std(nu_values)**2 + np.mean([r['nu_stderr']**2 for r in results]))
+        pc_std = np.sqrt(np.std(pc_values)**2 + np.mean([r['pc_stderr']**2 for r in results]))
+        redchi_std = np.std(redchi_values)
+        
+        return {
+            'nu_mean': nu_mean,
+            'nu_std': nu_std,
+            'pc_mean': pc_mean,
+            'pc_std': pc_std,
+            'redchi_mean': redchi_mean,
+            'redchi_std': redchi_std,
+            'samples': results
+        }
+    
+    def perform_bootstrap_analysis(self, n_samples=100, sample_size=1000, 
+                                  L_min=None, L_max=None, 
+                                  p_range=None, seed=None, 
+                                  implementations=None, nu_vary=True, p_c_vary=True):
+        """
+        Perform and compare bootstrapped data collapse analysis for different implementations.
+        
+        Parameters:
+        -----------
+        n_samples : int
+            Number of bootstrap samples to generate
+        sample_size : int
+            Size of each bootstrap sample
+        L_min : int, optional
+            Minimum system size to include
+        L_max : int, optional
+            Maximum system size to include
+        p_range : tuple, optional
+            (min, max) range of p values to include
+        seed : int, optional
+            Random seed for reproducibility
+        implementations : list, optional
+            List of implementations to compare (default: all in df)
+        nu_vary : bool
+            Whether to vary nu in the fit
+        p_c_vary : bool
+            Whether to vary p_c in the fit
+        
+        Returns:
+        --------
+        dict
+            Dictionary with implementation names as keys and bootstrap results as values
+        """
+        if self.unscaled_df is None:
+            print("No data available for analysis!")
+            return None
+        
+        # Get unique implementations if not specified
+        if implementations is None:
+            implementations = self.unscaled_df.index.get_level_values('implementation').unique()
+        
+        results = {}
+        
+        # Process each implementation
+        for impl in implementations:
+            print(f"\nPerforming bootstrap analysis for {impl.capitalize()} implementation:")
+            
+            # Perform bootstrap analysis
+            bootstrap_results = self.bootstrap_data_collapse(
+                implementation=impl,
+                n_samples=n_samples,
+                sample_size=sample_size,
+                L_min=L_min,
+                L_max=L_max,
+                p_range=p_range,
+                seed=seed,
+                nu_vary=nu_vary,
+                p_c_vary=p_c_vary
+            )
+            
+            if bootstrap_results is not None:
+                results[impl] = bootstrap_results
                 
                 # Print results
-                print(f"  nu = {single_results['nu']:.3f} ± {single_results['nu_stderr']:.3f}")
-                print(f"  p_c = {single_results['pc']:.3f} ± {single_results['pc_stderr']:.3f}")
-                print(f"  reduced chi^2 = {single_results['redchi']:.3f}")
-            except Exception as e:
-                print(f"  Error performing data collapse: {str(e)}")
-                continue
-    
-    return results
+                print(f"  nu = {bootstrap_results['nu_mean']:.3f} ± {bootstrap_results['nu_std']:.3f}")
+                print(f"  p_c = {bootstrap_results['pc_mean']:.3f} ± {bootstrap_results['pc_std']:.3f}")
+                print(f"  reduced chi^2 = {bootstrap_results['redchi_mean']:.3f} ± {bootstrap_results['redchi_std']:.3f}")
+        
+        return results
 
-def plot_data_collapse(df, p_c, nu, beta=0, p_fixed=None, p_fixed_name=None, threshold=None, 
-                      implementation=None, L_min=None, L_max=None, p_range=None, 
-                      figsize=(10, 8), save_fig=True, output_dir=None, filename=None):
-    """
-    Plot and save the data collapse visualization for TMI data.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame with MultiIndex (p, L) containing TMI observations
-    p_c : float
-        Critical point
-    nu : float
-        Critical exponent
-    beta : float, optional
-        Scaling dimension (usually 0 for TMI)
-    p_fixed : float, optional
-        Fixed parameter value (for filename)
-    p_fixed_name : str, optional
-        Name of fixed parameter ('pproj' or 'pctrl') (for filename)
-    threshold : float, optional
-        Threshold value used (for filename)
-    implementation : str, optional
-        Implementation name (for filename)
-    L_min : int, optional
-        Minimum system size to include
-    L_max : int, optional
-        Maximum system size to include
-    p_range : tuple, optional
-        (min, max) range of p values to include
-    figsize : tuple, optional
-        Figure size
-    save_fig : bool, optional
-        Whether to save the figure
-    output_dir : str, optional
-        Directory to save the figure
-    filename : str, optional
-        Custom filename for the saved figure
+    def plot_compare_loss_manifold(self, p_range, nu_range, n_points=100, L_min=12, 
+                                   implementations=None, figsize=(15, 6)):
+        """
+        Visualize and compare the loss function manifold for different implementations.
         
-    Returns:
-    --------
-    tuple
-        (fig, axes) tuple containing the figure and its axes
-    """
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from matplotlib.colors import to_rgba
-    
-    # Filter by L values if needed
-    if L_min is not None or L_max is not None:
-        L_values = df.index.get_level_values('L')
-        mask = np.ones(len(df), dtype=bool)
-        if L_min is not None:
-            mask &= L_values >= L_min
-        if L_max is not None:
-            mask &= L_values <= L_max
-        df = df.loc[mask]
-    
-    # Filter by p range if needed
-    if p_range is not None:
-        p_values = df.index.get_level_values('p')
-        mask = (p_values >= p_range[0]) & (p_values <= p_range[1])
-        df = df.loc[mask]
-    
-    # Get unique L values and sort them
-    unique_L = sorted(df.index.get_level_values('L').unique())
-    
-    # Create figure with two subplots: raw data and collapsed data
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-    
-    # Define colormap for L values
-    cmap = plt.cm.viridis
-    colors = [cmap(i / max(1, len(unique_L) - 1)) for i in range(len(unique_L))]
-    
-    # Plot raw data
-    for i, L in enumerate(unique_L):
-        L_data = df.loc[(slice(None), L), :]
-        p_values = L_data.index.get_level_values('p')
-        
-        # Calculate mean and standard error for each p value
-        means = []
-        errors = []
-        for idx in L_data.index:
-            obs = L_data.loc[idx, 'observations']
-            if isinstance(obs, list):
-                means.append(np.mean(obs))
-                errors.append(np.std(obs) / np.sqrt(len(obs)))
-            else:
-                means.append(obs)
-                errors.append(0)
-        
-        # Plot with error bars
-        axes[0].errorbar(p_values, means, yerr=errors, 
-                       marker='o', linestyle='-', color=colors[i], 
-                       label=f'L = {L}')
-    
-    # Add vertical line at p_c
-    axes[0].axvline(x=p_c, color='k', linestyle='--', alpha=0.7, label=f'p_c = {p_c:.3f}')
-    
-    # Set labels and title for raw data
-    axes[0].set_xlabel('p')
-    axes[0].set_ylabel('TMI')
-    axes[0].set_title('Raw TMI Data')
-    axes[0].legend(loc='best')
-    
-    # Plot collapsed data
-    for i, L in enumerate(unique_L):
-        L_data = df.loc[(slice(None), L), :]
-        p_values = L_data.index.get_level_values('p')
-        
-        # Calculate mean and standard error for each p value
-        means = []
-        errors = []
-        for idx in L_data.index:
-            obs = L_data.loc[idx, 'observations']
-            if isinstance(obs, list):
-                means.append(np.mean(obs))
-                errors.append(np.std(obs) / np.sqrt(len(obs)))
-            else:
-                means.append(obs)
-                errors.append(0)
-        
-        # Calculate scaled x and y values
-        x_scaled = (p_values - p_c) * L**(1/nu)
-        y_scaled = np.array(means) * L**beta
-        errors_scaled = np.array(errors) * L**beta
-        
-        # Plot with error bars
-        axes[1].errorbar(x_scaled, y_scaled, yerr=errors_scaled, 
-                       marker='o', linestyle='', color=colors[i], 
-                       label=f'L = {L}')
-    
-    # Set labels and title for collapsed data
-    axes[1].set_xlabel(r'$(p - p_c) L^{1/\nu}$')
-    axes[1].set_ylabel(r'$\mathrm{TMI} \cdot L^{\beta}$')
-    axes[1].set_title(f'Data Collapse (p_c = {p_c:.3f}, ν = {nu:.3f}, β = {beta:.3f})')
-    axes[1].legend(loc='best')
-    
-    # Add grid
-    axes[0].grid(alpha=0.3)
-    axes[1].grid(alpha=0.3)
-    
-    # Adjust layout
-    plt.tight_layout()
-    
-    # Save figure if requested
-    if save_fig:
-        if output_dir is None:
-            output_dir = 'tmi_compare_plots'
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Generate filename if not provided
-        if filename is None:
-            parts = []
-            if implementation:
-                parts.append(implementation)
-            if p_fixed is not None and p_fixed_name:
-                parts.append(f"{p_fixed_name}{p_fixed:.3f}")
-            if threshold is not None:
-                parts.append(f"threshold{threshold:.1e}")
+        Parameters:
+        -----------
+        p_range : tuple
+            (min_p, max_p) range to explore
+        nu_range : tuple
+            (min_nu, max_nu) range to explore
+        n_points : int
+            Number of points to sample in each dimension
+        L_min : int
+            Minimum system size to include
+        implementations : list, optional
+            List of implementations to compare (default: all in df)
+        figsize : tuple
+            Figure size
             
-            filename = f"data_collapse_{'_'.join(parts)}.png"
+        Returns:
+        --------
+        tuple
+            (fig, axes) tuple
+        """
+        if self.unscaled_df is None:
+            print("No data available for analysis!")
+            return None
         
-        fig_path = os.path.join(output_dir, filename)
+        # Get unique implementations if not specified
+        if implementations is None:
+            implementations = self.unscaled_df.index.get_level_values('implementation').unique()
+        
+        # Create figure with subplots for each implementation
+        fig, axes = plt.subplots(len(implementations), 2, figsize=figsize)
+        if len(implementations) == 1:
+            axes = [axes]  # Make axes indexable for single implementation
+        
+        # Create meshgrid of p and nu values
+        p_vals = np.linspace(p_range[0], p_range[1], n_points)
+        nu_vals = np.linspace(nu_range[0], nu_range[1], n_points)
+        PC, NU = np.meshgrid(p_vals, nu_vals)
+        
+        # Process each implementation
+        for i, impl in enumerate(implementations):
+            # Filter data for this implementation
+            impl_df = self.unscaled_df.xs(impl, level='implementation')
+            
+            # Create a DataCollapse object
+            dc = DataCollapse(impl_df, 
+                            p_='p', 
+                            L_='L',
+                            params={},
+                            p_range=p_range,
+                            Lmin=L_min)
+            
+            # Calculate loss for each point
+            Z = np.zeros_like(PC)
+            for j in range(n_points):
+                for k in range(n_points):
+                    loss_vals = dc.loss(PC[j,k], NU[j,k], beta=0)
+                    Z[j,k] = np.sum(loss_vals**2) / (len(loss_vals) - 2)
+            
+            # Contour plot
+            cont = axes[i][0].contour(PC, NU, Z, levels=20)
+            axes[i][0].clabel(cont, inline=True, fontsize=8)
+            axes[i][0].set_xlabel('p_c')
+            axes[i][0].set_ylabel('nu')
+            axes[i][0].set_title(f'{impl.capitalize()} Implementation - Loss Contours')
+            
+            # Color map plot
+            surf = axes[i][1].pcolormesh(PC, NU, np.log10(Z), shading='auto')
+            axes[i][1].set_xlabel('p_c')
+            axes[i][1].set_ylabel('nu')
+            axes[i][1].set_title(f'{impl.capitalize()} Implementation - Log10 Loss')
+            plt.colorbar(surf, ax=axes[i][1])
+        
+        plt.tight_layout()
+        
+        # Save figure
+        fig_path = os.path.join(
+            self.output_folder,
+            f'loss_manifold_comparison_{self.p_fixed_name}{self.p_fixed:.3f}_threshold{self.threshold:.1e}.png'
+        )
         plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-        print(f"Saved data collapse figure to {fig_path}")
+        print(f"Saved loss manifold figure to {fig_path}")
+        
+        return fig, axes
     
-    return fig, axes
+    def result(self, bootstrap=False, L_min=None, L_max=None, p_range=None, 
+                 implementations=None, nu_vary=True, p_c_vary=True):
+        '''
+        Output the results of the data collapse analysis:
+        This includes:
+        - estimated p_c and nu for each implementation (with or without bootstrap)
+        - saved figure of loss manifold for each implementation
+        - saved figure of data collapse comparison for each implementation
+        
+        Parameters:
+        -----------
+        bootstrap : bool
+            Whether to perform bootstrap analysis
+        L_min : int, optional
+            Minimum system size to include
+        L_max : int, optional
+            Maximum system size to include
+        p_range : tuple, optional
+            (min, max) range of p values to include
+        implementations : list, optional
+            List of implementations to compare (default: all in df)
+        nu_vary : bool
+            Whether to vary nu in the fit
+        p_c_vary : bool
+            Whether to vary p_c in the fit
+            
+        Returns:
+        --------
+        dict
+            Dictionary with implementation names as keys and results as values
+        '''        
+        unscaled_df = self.read_from_csv()
+        if unscaled_df is None:
+            response = input("No existing results found. Compute new ones? (y/n): ")
+            if response.lower() == 'y':
+                self.read_and_compute_from_h5(n=0)
+            else:
+                print("Exiting without analysis.")
+                return None
 
-def save_data_collapse_from_csv(p_fixed, p_fixed_name, threshold, 
-                               p_c, nu, beta=0, L_min=None, L_max=None, 
-                               p_range=None, implementations=None,
-                               figsize=(10, 8), output_dir=None):
-    """
-    Create and save data collapse plots using data from CSV files.
-    
-    Parameters:
-    -----------
-    p_fixed : float
-        Fixed parameter value
-    p_fixed_name : str
-        Name of fixed parameter ('pproj' or 'pctrl')
-    threshold : float
-        Threshold value for TMI computation
-    p_c : float or dict
-        Critical point (can be a single value or a dict with implementation names as keys)
-    nu : float or dict
-        Critical exponent (can be a single value or a dict with implementation names as keys)
-    beta : float, optional
-        Scaling dimension (usually 0 for TMI)
-    L_min : int, optional
-        Minimum system size to include
-    L_max : int, optional
-        Maximum system size to include
-    p_range : tuple, optional
-        (min, max) range of p values to include
-    implementations : list, optional
-        List of implementations to process (default: all in the CSV)
-    figsize : tuple, optional
-        Figure size
-    output_dir : str, optional
-        Directory to save the figures
+        # Get unique implementations if not specified
+        if implementations is None:
+            implementations = self.unscaled_df.index.get_level_values('implementation').unique()
         
-    Returns:
-    --------
-    dict
-        Dictionary with implementation names as keys and (fig, axes) tuples as values
-    """
-    # Read data from CSV
-    df = read_tmi_compare_results_from_csv(p_fixed, p_fixed_name, threshold)
-    
-    if df is None:
-        print("No data available for analysis.")
-        return None
-    
-    # Get unique implementations if not specified
-    if implementations is None:
-        implementations = df['implementation'].unique()
-    
-    results = {}
-    
-    # Process each implementation
-    for impl in implementations:
-        print(f"\nCreating data collapse plot for {impl.capitalize()} implementation:")
+        # Determine p_range if not provided
+        if p_range is None: # plot the loss manifold over the entire p range
+            p_min = self.unscaled_df.index.get_level_values('p').min()
+            p_max = self.unscaled_df.index.get_level_values('p').max()
+            p_range = (p_min, p_max)
+            print(f"Using p_range: ({p_min:.3f}, {p_max:.3f})")
         
-        # Filter data for this implementation
-        impl_df = df[df['implementation'] == impl].copy()
-        
-        # Set up for data collapse
-        p_col = 'pctrl' if p_fixed_name == 'pproj' else 'pproj'
-        impl_df['p'] = impl_df[p_col]  # Create 'p' column for data collapse
-        
-        # Convert observations column from string to list of floats if needed
-        if len(impl_df) > 0 and isinstance(impl_df['observations'].iloc[0], str):
-            impl_df['observations'] = impl_df['observations'].apply(
-                lambda x: [float(val) for val in x.strip('[]').split(',')]
-            )
-        
-        # Group by (p, L) and collect all observations for each group
-        grouped_data = []
-        for (p, L), group in impl_df.groupby(['p', 'L']):
-            # Combine all observations from this group
-            all_obs = []
-            for obs in group['observations']:
-                if isinstance(obs, list):
-                    all_obs.extend(obs)
-                else:
-                    all_obs.append(obs)
-            
-            grouped_data.append({
-                'p': p,
-                'L': L,
-                'observations': all_obs
-            })
-        
-        # Create new DataFrame for analysis
-        analysis_df = pd.DataFrame(grouped_data)
-        
-        # Check if we have enough data
-        if len(analysis_df) == 0:
-            print(f"  Warning: No data available for {impl} implementation after filtering")
-            continue
-            
-        analysis_df = analysis_df.set_index(['p', 'L'])
-        
-        # Get p_c and nu values for this implementation
-        impl_p_c = p_c[impl] if isinstance(p_c, dict) else p_c
-        impl_nu = nu[impl] if isinstance(nu, dict) else nu
-        
-        # Create and save data collapse plot
-        fig, axes = plot_data_collapse(
-            df=analysis_df,
-            p_c=impl_p_c,
-            nu=impl_nu,
-            beta=beta,
-            p_fixed=p_fixed,
-            p_fixed_name=p_fixed_name,
-            threshold=threshold,
-            implementation=impl,
-            L_min=L_min,
-            L_max=L_max,
+        # Plot loss manifold to visualize the parameter space
+        print("\nGenerating loss manifold plots...")
+        fig_loss, axes_loss = self.plot_compare_loss_manifold(
             p_range=p_range,
-            figsize=figsize,
-            save_fig=True,
-            output_dir=output_dir
-        )
-        
-        results[impl] = (fig, axes)
-    
-    return results
-
-if __name__ == "__main__":
-    # Example usage
-    thresholds = [1.0e-15]
-    p_fixed = 0.0
-    p_fixed_name = 'pctrl'
-    L_min = 8
-    p_c = 0.5
-    nu = 1.33
-    
-    # Read or compute TMI values
-    results = read_tmi_compare_results(
-        p_fixed=p_fixed, 
-        p_fixed_name=p_fixed_name, 
-        thresholds=thresholds,
-    )
-    
-    if thresholds[0] in results:
-        # Plot comparison
-        fig, ax = plot_tmi_comparison(
-            results_dict=results,
-            p_fixed=p_fixed,
-            p_fixed_name=p_fixed_name,
-            threshold=thresholds[0],
-            p_c=p_c,  # Example critical point
-            save_fig=True
-        )
-        
-        # Plot loss manifold comparison
-        fig_loss, axes_loss = plot_compare_loss_manifold(
-            df=results[thresholds[0]],
-            p_range=(0.45, 0.55),
-            nu_range=(0.3, 1.5),
+            nu_range=(0.5, 1.5),
             n_points=50,
             L_min=L_min,
-            save_fig=True
+            implementations=implementations
         )
         
-        # Perform bootstrap analysis comparison
-        bootstrap_results = compare_bootstrap_analysis_from_csv(
-            p_fixed=p_fixed,
-            p_fixed_name=p_fixed_name,
-            threshold=thresholds[0],
-            p_c=0.5,
-            nu=1.33,
-            L_min=L_min,
-            bootstrap=True,
-            nu_vary=True,
-            p_c_vary=True
-        )
+        results = {}
         
-        # Create and save data collapse plots
-        if bootstrap_results:
+        # Perform data collapse analysis
+        if bootstrap:
+            # Get bootstrap parameters from user
+            n_samples = int(input("Enter the number of bootstrap samples (default: 100): ") or 100)
+            sample_size = int(input("Enter the sample size (default: 1000): ") or 1000)
+            seed = int(input("Enter random seed for reproducibility (default: 42): ") or 42)
             
-            # Check if bootstrap was used and extract p_c and nu values accordingly
-            bootstrap_mode = bootstrap_results[list(bootstrap_results.keys())[0]].get('nu_mean') is not None
-            
-            if bootstrap_mode:
-                # Extract p_c and nu values from bootstrap results (bootstrap=True case)
-                p_c_dict = {impl: res['pc_mean'] for impl, res in bootstrap_results.items()}
-                nu_dict = {impl: res['nu_mean'] for impl, res in bootstrap_results.items()}
-                print("Using bootstrap mean values for data collapse")
-            else:
-                # Extract p_c and nu values from single fit results (bootstrap=False case)
-                p_c_dict = {impl: res['pc'] for impl, res in bootstrap_results.items()}
-                nu_dict = {impl: res['nu'] for impl, res in bootstrap_results.items()}
-                print("Using single fit values for data collapse")
-            
-            # Create data collapse plots
-            data_collapse_results = save_data_collapse_from_csv(
-                p_fixed=p_fixed,
-                p_fixed_name=p_fixed_name,
-                threshold=thresholds[0],
-                p_c=p_c_dict,
-                nu=nu_dict,
+            # Perform bootstrap data collapse analysis
+            print("\nPerforming bootstrap data collapse analysis...")
+            bootstrap_results = self.perform_bootstrap_analysis(
+                n_samples=n_samples,
+                sample_size=sample_size,
                 L_min=L_min,
-                output_dir='tmi_compare_plots'
+                L_max=L_max,
+                p_range=p_range,
+                seed=seed,
+                implementations=implementations,
+                nu_vary=nu_vary,
+                p_c_vary=p_c_vary
             )
+            
+            # Store results
+            for impl, res in bootstrap_results.items():
+                results[impl] = {
+                    'pc': res['pc_mean'],
+                    'pc_err': res['pc_std'],
+                    'nu': res['nu_mean'],
+                    'nu_err': res['nu_std'],
+                    'redchi': res['redchi_mean'],
+                    'redchi_err': res['redchi_std'],
+                    'method': 'bootstrap',
+                    'bootstrap_samples': n_samples,
+                    'sample_size': sample_size
+                }
+                
+                # Generate data collapse plot using bootstrap results
+                print(f"\nGenerating data collapse plot for {impl} using bootstrap results...")
+                
+                # Save the original values
+                orig_pc = self.pc_guess
+                orig_nu = self.nu_guess
+                
+                # Temporarily set the guesses to the bootstrap results
+                self.pc_guess = res['pc_mean']
+                self.nu_guess = res['nu_mean']
+                
+                # Perform data collapse with fixed parameters from bootstrap
+                result = self.perform_data_collapse(
+                    implementation=impl,
+                    beta=0,
+                    L_min=L_min,
+                    L_max=L_max,
+                    p_range=p_range,
+                    nu_vary=nu_vary,  # Use fixed values from bootstrap
+                    p_c_vary=p_c_vary  # Use fixed values from bootstrap
+                )
+                
+                # Restore original values
+                self.pc_guess = orig_pc
+                self.nu_guess = orig_nu
+        else:
+            # Perform regular data collapse for each implementation
+            print("\nPerforming data collapse analysis...")
+            for impl in implementations:
+                result = self.perform_data_collapse(
+                    implementation=impl,
+                    beta=0,
+                    L_min=L_min,
+                    L_max=L_max,
+                    p_range=p_range,
+                    nu_vary=nu_vary,
+                    p_c_vary=p_c_vary
+                )
+                
+                if result:
+                    fig, axes, fit_result = result
+                    results[impl] = {
+                        'pc': fit_result.params['p_c'].value,
+                        'pc_err': fit_result.params['p_c'].stderr if fit_result.params['p_c'].stderr is not None else 0,
+                        'nu': fit_result.params['nu'].value,
+                        'nu_err': fit_result.params['nu'].stderr if fit_result.params['nu'].stderr is not None else 0,
+                        'redchi': fit_result.redchi,
+                        'method': 'direct fit',
+                        'nfree': fit_result.nfree
+                    }
         
-        plt.show()
-    else:
-        print(f"No results found for threshold {thresholds[0]}")
+        # Print summary of results
+        if results:
+            print("\nSummary of Data Collapse Results:")
+            print("---------------------------------")
+            for impl, res in results.items():
+                print(f"{impl.capitalize()}:")
+                print(f"  Method: {res['method']}")
+                print(f"  p_c = {res['pc']:.5f} ± {res.get('pc_err', 0):.5f}")
+                print(f"  nu = {res['nu']:.5f} ± {res.get('nu_err', 0):.5f}")
+                print(f"  reduced chi^2 = {res['redchi']:.5f}")
+                print()
+            
+            # Save results to CSV
+            self._save_results_to_csv(results)
+        
+        return results
+    
+    def _save_results_to_csv(self, results):
+        """Save analysis results to CSV file."""
+        if not results:
+            return
+            
+        # Prepare data for CSV
+        csv_data = []
+        for impl, res in results.items():
+            row = {
+                'implementation': impl,
+                'method': res['method'],
+                'p_fixed': self.p_fixed,
+                'p_fixed_name': self.p_fixed_name,
+                'threshold': self.threshold,
+                'pc': res['pc'],
+                'pc_err': res.get('pc_err', 0),
+                'nu': res['nu'],
+                'nu_err': res.get('nu_err', 0),
+                'redchi': res['redchi']
+            }
+            
+            # Add additional fields based on method
+            if res['method'] == 'bootstrap':
+                row['bootstrap_samples'] = res.get('bootstrap_samples', '')
+                row['sample_size'] = res.get('sample_size', '')
+                row['redchi_err'] = res.get('redchi_err', 0)
+            else:
+                row['nfree'] = res.get('nfree', '')
+                
+            csv_data.append(row)
+        
+        # Create DataFrame and save to CSV
+        results_df = pd.DataFrame(csv_data)
+        csv_filename = os.path.join(
+            self.output_folder,
+            f'data_collapse_results_{self.p_fixed_name}{self.p_fixed:.3f}_threshold{self.threshold:.1e}.csv'
+        )
+        results_df.to_csv(csv_filename, index=False)
+        print(f"Saved results to {csv_filename}")
+
+if __name__ == "__main__":
+    analyzer = TMIAnalyzer(pc_guess=0.5, nu_guess=1.33, p_fixed=0.0, p_fixed_name='pctrl', threshold=1.0e-15)
+    results = analyzer.result(bootstrap=True)
