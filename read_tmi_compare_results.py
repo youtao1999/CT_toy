@@ -471,7 +471,7 @@ class TMIAnalyzer:
             axes[0].grid(alpha=0.3)
             
             axes[1].set_xlabel(r'$(p - p_c) L^{1/\nu}$')
-            axes[1].set_ylabel(r'$\mathrm{TMI} \cdot L^{\beta}$')
+            axes[1].set_ylabel(r'$\mathrm{TMI}$')
             axes[1].set_title(f'Data Collapse (p_c = {fitted_pc:.3f}, ν = {fitted_nu:.3f}, β = {beta:.3f})')
             axes[1].legend(loc='best')
             axes[1].grid(alpha=0.3)
@@ -869,6 +869,7 @@ class TMIAnalyzer:
             implementations=implementations
         )
         
+        # Initialize results dictionary
         results = {}
         
         # Perform data collapse analysis
@@ -909,28 +910,86 @@ class TMIAnalyzer:
                 # Generate data collapse plot using bootstrap results
                 print(f"\nGenerating data collapse plot for {impl} using bootstrap results...")
                 
-                # Save the original values
-                orig_pc = self.pc_guess
-                orig_nu = self.nu_guess
+                # Create figure with two subplots
+                fig, axes = plt.subplots(1, 2, figsize=(15, 6))
                 
-                # Temporarily set the guesses to the bootstrap results
-                self.pc_guess = res['pc_mean']
-                self.nu_guess = res['nu_mean']
+                # Filter data for this implementation
+                impl_df = self.unscaled_df.xs(impl, level='implementation')
                 
-                # Perform data collapse with fixed parameters from bootstrap
-                result = self.perform_data_collapse(
-                    implementation=impl,
-                    beta=0,
-                    L_min=L_min,
-                    L_max=L_max,
-                    p_range=p_range,
-                    nu_vary=nu_vary,  # Use fixed values from bootstrap
-                    p_c_vary=p_c_vary  # Use fixed values from bootstrap
+                # Apply filters
+                if L_min is not None or L_max is not None:
+                    L_values = impl_df.index.get_level_values('L')
+                    mask = np.ones(len(impl_df), dtype=bool)
+                    if L_min is not None:
+                        mask &= L_values >= L_min
+                    if L_max is not None:
+                        mask &= L_values <= L_max
+                    impl_df = impl_df.loc[mask]
+                
+                if p_range is not None:
+                    p_values = impl_df.index.get_level_values('p')
+                    mask = (p_values >= p_range[0]) & (p_values <= p_range[1])
+                    impl_df = impl_df.loc[mask]
+                
+                # Get unique L values and colors
+                unique_L = sorted(impl_df.index.get_level_values('L').unique())
+                colors = plt.cm.viridis(np.linspace(0, 1, len(unique_L)))
+                
+                # Use bootstrap results for visualization
+                fitted_pc = res['pc_mean']
+                fitted_nu = res['nu_mean']
+                beta = 0  # Usually 0 for TMI
+                
+                # Plot raw and collapsed data
+                for i, L in enumerate(unique_L):
+                    L_data = impl_df.loc[(slice(None), L), :]
+                    p_values = L_data.index.get_level_values('p')
+                    
+                    # Calculate statistics
+                    means = [np.mean(obs) for obs in L_data['observations']]
+                    errors = [np.std(obs) / np.sqrt(len(obs)) for obs in L_data['observations']]
+                    
+                    # Raw data plot
+                    axes[0].errorbar(p_values, means, yerr=errors,
+                                   marker='o', linestyle='-', color=colors[i],
+                                   label=f'L = {L}')
+                    
+                    # Collapsed data plot using bootstrap parameters
+                    x_scaled = (p_values - fitted_pc) * L**(1/fitted_nu)
+                    y_scaled = np.array(means) * L**beta
+                    errors_scaled = np.array(errors) * L**beta
+                    
+                    axes[1].errorbar(x_scaled, y_scaled, yerr=errors_scaled,
+                                   marker='o', linestyle='', color=colors[i],
+                                   label=f'L = {L}')
+                
+                # Add vertical line at p_c in raw data plot
+                axes[0].axvline(x=fitted_pc, color='k', linestyle='--', alpha=0.7,
+                               label=f'p_c = {fitted_pc:.3f}')
+                
+                # Set labels and titles
+                axes[0].set_xlabel('p')
+                axes[0].set_ylabel('TMI')
+                axes[0].set_title(f'Raw TMI Data - {impl.capitalize()}')
+                axes[0].legend(loc='best')
+                axes[0].grid(alpha=0.3)
+                axes[0].set_xlim(p_range[0], p_range[1])
+                
+                axes[1].set_xlabel(r'$(p - p_c) L^{1/\nu}$')
+                axes[1].set_ylabel(r'$\mathrm{TMI}$')
+                axes[1].set_title(f'Bootstrap Data Collapse (p_c = {fitted_pc:.3f}, ν = {fitted_nu:.3f}, β = {beta:.3f})')
+                axes[1].legend(loc='best')
+                axes[1].grid(alpha=0.3)
+                # Don't set fixed x-limits for the scaled plot - let matplotlib auto-scale
+                plt.tight_layout()
+                
+                # Save figure
+                fig_path = os.path.join(
+                    self.output_folder,
+                    f'bootstrap_collapse_{impl}_{self.p_fixed_name}{self.p_fixed:.3f}_threshold{self.threshold:.1e}.png'
                 )
-                
-                # Restore original values
-                self.pc_guess = orig_pc
-                self.nu_guess = orig_nu
+                plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+                print(f"Saved bootstrap data collapse figure to {fig_path}")
         else:
             # Perform regular data collapse for each implementation
             print("\nPerforming data collapse analysis...")
@@ -1016,4 +1075,4 @@ class TMIAnalyzer:
 
 if __name__ == "__main__":
     analyzer = TMIAnalyzer(pc_guess=0.5, nu_guess=1.33, p_fixed=0.0, p_fixed_name='pctrl', threshold=1.0e-15)
-    results = analyzer.result(bootstrap=True)
+    results = analyzer.result(bootstrap=True, L_min=12, L_max=20, p_range=(0.35, 0.65))
