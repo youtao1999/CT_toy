@@ -782,9 +782,56 @@ class TMIAnalyzer:
                     loss_vals = dc.loss(PC[j,k], NU[j,k], beta=0)
                     Z[j,k] = np.sum(loss_vals**2) / (len(loss_vals) - 2)
             
-            # Contour plot
-            cont = axes[i][0].contour(PC, NU, Z, levels=20)
-            axes[i][0].clabel(cont, inline=True, fontsize=8)
+            # Find min and max values for better level spacing
+            z_min = np.nanmin(Z)
+            z_max = np.nanmax(Z)
+            num_levels = 60  # Increased from 30 to 50 for more detail
+
+            # Create contour levels with proper error handling
+            try:
+                # Try logarithmic spacing first (good for loss functions that vary by orders of magnitude)
+                if z_min > 0:  # Ensure we don't take log of negative values
+                    log_min = np.log10(max(z_min, 1e-10))  # Avoid very small values
+                    log_max = np.log10(max(z_max, z_min*1.1))  # Ensure max > min
+                    levels = np.logspace(log_min, log_max, num_levels)  # Logarithmic spacing
+
+                                # Find and label all points with loss < 2
+                    low_loss_mask = Z < 1.5
+                    low_loss_points = np.where(low_loss_mask)
+                    for point_idx in range(len(low_loss_points[0])):
+                        j, k = low_loss_points[0][point_idx], low_loss_points[1][point_idx]
+                        loss_val = Z[j,k]
+                        p_val = PC[j,k]
+                        nu_val = NU[j,k]
+                        print(f"Low loss point found: p={p_val:.3f}, nu={nu_val:.3f}, loss={loss_val:.3f}")
+                        # Add dot marker for low loss point
+                        axes[i][0].plot(p_val, nu_val, 'o', color='blue', alpha=0.5, markersize=3)
+
+                    # Add a horizontal line at nu = 1.5
+                    axes[i][0].axhline(y=1.5, color='red', linestyle='--', alpha=0.7)
+                    axes[i][0].axhline(y=1.33, color='blue', linestyle='--', alpha=0.7)
+                    axes[i][0].axvline(x=0.5, color='green', linestyle='--', alpha=0.7)
+                    # Add legend for reference lines
+                    axes[i][0].plot([], [], '--', color='red', label='$\\nu$ = 1.5')
+                    axes[i][0].plot([], [], '--', color='blue', label='$\\nu$ = 1.33')
+                    axes[i][0].plot([], [], '--', color='green', label='$p_c$ = 0.5')
+                    axes[i][0].legend(loc='upper right', fontsize=8)
+                else:
+                    # For linear spacing with custom step size
+                    # Ensure z_max > z_min and step is reasonable
+                    if np.isclose(z_max, z_min):
+                        z_max = z_min * 1.1 + 1e-5  # Add a small increment if they're too close
+                    
+                    # Use linspace instead of arange for better numerical stability
+                    levels = np.linspace(z_min, z_max, num_levels)
+            except Exception as e:
+                print(f"Warning: Error creating contour levels: {e}")
+                # Fallback to default levels
+                levels = num_levels
+            
+            # Contour plot with custom levels
+            cont = axes[i][0].contour(PC, NU, Z, levels=levels, linewidths=0.5)
+            axes[i][0].clabel(cont, inline=True, fontsize=6, fmt='%.1f')
             axes[i][0].set_xlabel('p_c')
             axes[i][0].set_ylabel('nu')
             axes[i][0].set_title(f'{impl.capitalize()} Implementation - Loss Contours')
@@ -863,7 +910,7 @@ class TMIAnalyzer:
         print("\nGenerating loss manifold plots...")
         fig_loss, axes_loss = self.plot_compare_loss_manifold(
             p_range=p_range,
-            nu_range=(0.5, 1.5),
+            nu_range=(0.7, 2.0),
             n_points=50,
             L_min=L_min,
             implementations=implementations
@@ -1063,7 +1110,7 @@ class TMIAnalyzer:
                 row['nfree'] = res.get('nfree', '')
                 
             csv_data.append(row)
-        
+
         # Create DataFrame and save to CSV
         results_df = pd.DataFrame(csv_data)
         csv_filename = os.path.join(
@@ -1075,4 +1122,4 @@ class TMIAnalyzer:
 
 if __name__ == "__main__":
     analyzer = TMIAnalyzer(pc_guess=0.5, nu_guess=1.33, p_fixed=0.0, p_fixed_name='pctrl', threshold=1.0e-15)
-    results = analyzer.result(bootstrap=True, L_min=12, L_max=20, p_range=(0.35, 0.65))
+    results = analyzer.result(bootstrap=False, L_min=12, L_max=20, p_range=(0.35, 0.65))
