@@ -888,12 +888,7 @@ class TMIAnalyzer:
         '''        
         unscaled_df = self.read_from_csv()
         if unscaled_df is None:
-            response = input("No existing results found. Compute new ones? (y/n): ")
-            if response.lower() == 'y':
-                self.read_and_compute_from_h5(n=0)
-            else:
-                print("Exiting without analysis.")
-                return None
+            self.read_and_compute_from_h5(n=0)
 
         # Get unique implementations if not specified
         if implementations is None:
@@ -1121,5 +1116,6 @@ class TMIAnalyzer:
         print(f"Saved results to {csv_filename}")
 
 if __name__ == "__main__":
-    analyzer = TMIAnalyzer(pc_guess=0.5, nu_guess=1.33, p_fixed=0.0, p_fixed_name='pctrl', threshold=1.0e-15)
-    results = analyzer.result(bootstrap=False, L_min=12, L_max=20, p_range=(0.35, 0.65))
+    for threshold in np.logspace(-15, -10, 6):
+        analyzer = TMIAnalyzer(pc_guess=0.5, nu_guess=1.33, p_fixed=0.0, p_fixed_name='pctrl', threshold=threshold)
+        results = analyzer.result(bootstrap=False, L_min=12, L_max=20, p_range=(0.35, 0.65))
