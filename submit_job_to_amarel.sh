@@ -5,7 +5,7 @@
 # Default values (can be overridden by command line arguments)
 P_FIXED_NAME="pctrl"
 P_FIXED="0.0"
-P_RANGE="0.55:0.65:20"
+P_RANGE="0.45:0.65:40"
 TOTAL_SAMPLES=2000
 COMPARISON="--comparison"  # Empty string for no comparison
 
@@ -41,34 +41,34 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Define the remote directory
-REMOTE_DIR="/scratch/ty296"
+REMOTE_DIR="/scratch/ty296/CT_toy"
 
 # Create a temporary script to run on Amarel
 cat > temp_run_commands.sh << EOF
 #!/bin/bash
-cd /scratch/ty296/
+cd /scratch/ty296/CT_toy
 
 # Make sure run_sv.sh is executable
-chmod +x /scratch/ty296/run_sv.sh
+chmod +x /scratch/ty296/CT_toy/run_sv.sh
 
 # Run all calculations simultaneously
 echo "Starting L=8 calculation..."
-/scratch/ty296/run_sv.sh 8 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 20 ${COMPARISON} > run_sv_L8_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
+/scratch/ty296/CT_toy/run_sv.sh 8 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 20 ${COMPARISON} > run_sv_L8_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
 L8_PID=\$!
 echo "L=8 job started with PID \$L8_PID"
 
 echo "Starting L=12 calculation..."
-/scratch/ty296/run_sv.sh 12 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 40 ${COMPARISON} > run_sv_L12_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
+/scratch/ty296/CT_toy/run_sv.sh 12 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 40 ${COMPARISON} > run_sv_L12_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
 L12_PID=\$!
 echo "L=12 job started with PID \$L12_PID"
 
 echo "Starting L=16 calculation..."
-/scratch/ty296/run_sv.sh 16 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 100 ${COMPARISON} > run_sv_L16_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
+/scratch/ty296/CT_toy/run_sv.sh 16 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 100 ${COMPARISON} > run_sv_L16_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
 L16_PID=\$!
 echo "L=16 job started with PID \$L16_PID"
 
 echo "Starting L=20 calculation..."
-/scratch/ty296/run_sv.sh 20 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 200 ${COMPARISON} > run_sv_L20_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
+/scratch/ty296/CT_toy/run_sv.sh 20 '${P_FIXED_NAME}' ${P_FIXED} "${P_RANGE}" ${TOTAL_SAMPLES} 200 ${COMPARISON} > run_sv_L20_${P_FIXED_NAME}${P_FIXED}.log 2>&1 &
 L20_PID=\$!
 echo "L=20 job started with PID \$L20_PID"
 

@@ -22,3 +22,6 @@ scp -r ty296@amarel:/scratch/ty296/sv_comparison_L20_pctrl0.000_p0.550-0.650 .
 
 # clearing out all the chunk files
 find . -type f -name "*chunk*" -delete
+
+# transfer only the final results files to local machine
+username="ty296"; remote_host="amarel.rutgers.edu"; remote_dir="/scratch/ty296/CT_toy"; ssh "$username@$remote_host" "for dir in \$(find $remote_dir -type d -name 'sv_comparison_L*_pctrl0.400_*'); do dirname=\$(basename \"\$dir\"); result=\$(find \"\$dir\" -name \"final_results_L*.h5\" | head -1); if [ -n \"\$result\" ]; then echo \"\$dirname \$result\"; fi; done" | while read dirname result; do mkdir -p "$dirname" && scp "$username@$remote_host:$(echo $result)" "$dirname/"; done

@@ -2,7 +2,7 @@
 
 # Cluster connection details - using your SSH config name
 CLUSTER_NAME="amarel"
-CLUSTER_PATH="/scratch/ty296/"
+CLUSTER_PATH="/scratch/ty296/CT_toy"
 
 # Function to display usage
 function show_usage {

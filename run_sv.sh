@@ -22,8 +22,19 @@ if [ "$7" == "--comparison" ]; then
     comparison="--comparison"
 fi
 
-# Submit the job and capture the job ID
-JOB_ID=$(sbatch --ntasks=$NCPU submit_sv.sh $L $p_fixed_name $p_fixed "$p_range" $total_samples $comparison | grep -o '[0-9]*')
+# Submit the job with proper Slurm parameters
+JOB_ID=$(sbatch \
+    --partition=main \
+    --job-name=sv_calc_L${L} \
+    --output=sv_calc_L${L}_${p_fixed_name}${p_fixed}_%j.out \
+    --error=sv_calc_L${L}_${p_fixed_name}${p_fixed}_%j.err \
+    --time=20:00:00 \
+    --mem-per-cpu=4G \
+    --ntasks=$NCPU \
+    --cpus-per-task=1 \
+    --mail-user=ty296@physics.rutgers.edu \
+    --mail-type=END,FAIL \
+    submit_sv.sh $L $p_fixed_name $p_fixed "$p_range" $total_samples $comparison | grep -o '[0-9]*')
 
 if [ -z "$JOB_ID" ]; then
     echo "Error: Failed to submit job"

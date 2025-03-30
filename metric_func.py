@@ -55,19 +55,15 @@ def tripartite_mutual_information_tao(vec, L, n=1, threshold=1e-10, return_singu
 
 def von_Neumann_entropy_pure(vec, subregion, L_T, n=1, threshold=1e-10, return_singular_values=False):
     """
-    Modified to compute SVD on smaller subsystem when possible.
+    Modified to use consistent matrix orientation like Haining's implementation.
     """
     vec_tensor = vec.reshape((2,) * L_T)
     subregion = list(subregion)
     not_subregion = [i for i in range(L_T) if i not in subregion]
     
-    # Choose smaller subsystem for SVD calculation
-    if len(subregion) > len(not_subregion):
-        vec_tensor_T = vec_tensor.transpose(np.hstack([not_subregion, subregion]))
-        S = np.linalg.svd(vec_tensor_T.reshape((2**len(not_subregion), 2**len(subregion))), compute_uv=False)
-    else:
-        vec_tensor_T = vec_tensor.transpose(np.hstack([subregion, not_subregion]))
-        S = np.linalg.svd(vec_tensor_T.reshape((2**len(subregion), 2**len(not_subregion))), compute_uv=False)
+    # Always use the same orientation as Haining's implementation
+    vec_tensor_T = vec_tensor.transpose(np.hstack([subregion, not_subregion]))
+    S = np.linalg.svd(vec_tensor_T.reshape((2**len(subregion), 2**len(not_subregion))), compute_uv=False)
     
     S_pos = np.clip(S, threshold, None)
     eigenvalues = S_pos**2

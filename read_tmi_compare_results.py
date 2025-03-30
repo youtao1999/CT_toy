@@ -16,7 +16,7 @@ class TMIAnalyzer:
     including data collapse analysis and bootstrap analysis.
     """
     
-    def __init__(self, pc_guess, nu_guess, p_fixed, p_fixed_name, threshold=1.0e-15, output_folder="tmi_compare_results"):
+    def __init__(self, pc_guess, nu_guess, p_fixed, p_fixed_name, threshold, output_folder="tmi_compare_results"):
         """
         Initialize TMIAnalyzer with basic parameters.
         
@@ -144,30 +144,44 @@ class TMIAnalyzer:
         pandas.DataFrame
             DataFrame with computed TMI values
         """
-        # Find all relevant HDF5 files
-        file_pattern = f'sv_comparison_L*_{self.p_fixed_name}{self.p_fixed:.3f}_p*'
-        all_files = glob.glob(file_pattern)
+        # Find all relevant HDF5 files - use a more general pattern to catch all p ranges
+        base_pattern = f'sv_comparison_L*_{self.p_fixed_name}{self.p_fixed:.3f}_*'
+        all_directories = glob.glob(base_pattern)
         
-        if not all_files:
-            print(f"No HDF5 files found matching pattern: {file_pattern}")
+        if not all_directories:
+            print(f"No HDF5 directories found matching pattern: {base_pattern}")
             return None
         
-        # Extract unique L values from filenames if not provided
+        # Extract unique L values from directory names if not provided
         if L_values is None:
-            L_values = sorted(list(set([int(f.split('_L')[1].split('_')[0]) for f in all_files])))
+            L_values = sorted(list(set([int(d.split('_L')[1].split('_')[0]) for d in all_directories])))
         
         data_list = []
         for L in tqdm(L_values, desc="Processing L values"):
-            L_files = [f for f in all_files if f'_L{L}_' in f]
+            # Find all directories for this L value
+            L_directories = [d for d in all_directories if f'_L{L}_' in d]
+            print(f"\nFound {len(L_directories)} directories for L={L}:")
+            for d in L_directories:
+                print(f"  {d}")
             
-            for file_path in tqdm(L_files, desc=f"Processing files for L={L}", leave=False):
-                filename = os.path.join(file_path, f'final_results_L{L}.h5')
+            # Process each directory
+            for directory in tqdm(L_directories, desc=f"Processing directories for L={L}", leave=False):
+                filename = os.path.join(directory, f'final_results_L{L}.h5')
                 if os.path.exists(filename):
                     file_results = self._read_single_h5_file(filename, n, L)
-                    data_list.extend(file_results)
+                    if file_results:  # Only extend if we got results
+                        data_list.extend(file_results)
+                else:
+                    print(f"Warning: File {filename} not found!")
         
         if data_list:
+            # Create DataFrame
             df = pd.DataFrame(data_list)
+            
+            # Sort by p value to ensure proper ordering
+            df = df.sort_values(['L', 'implementation', 'p'])
+            
+            # Set index
             df_final = df.set_index(['p', 'L', 'implementation'])
             self.unscaled_df = df_final
             
@@ -216,6 +230,9 @@ class TMIAnalyzer:
         if self.unscaled_df is None:
             print("No results to save!")
             return
+        
+        # Ensure output directory exists
+        os.makedirs(self.output_folder, exist_ok=True)
         
         csv_data = []
         for (p, L, implementation), row in self.unscaled_df.iterrows():
@@ -436,28 +453,34 @@ class TMIAnalyzer:
             unique_L = sorted(df.index.get_level_values('L').unique())
             colors = plt.cm.viridis(np.linspace(0, 1, len(unique_L)))
             
-            # Plot raw and collapsed data
+            # Plot raw and collapsed data with error bars for each L
             for i, L in enumerate(unique_L):
                 L_data = df.loc[(slice(None), L), :]
                 p_values = L_data.index.get_level_values('p')
                 
-                # Calculate statistics
+                # Calculate mean and standard error for each point
                 means = [np.mean(obs) for obs in L_data['observations']]
-                errors = [np.std(obs) / np.sqrt(len(obs)) for obs in L_data['observations']]
+                stderrs = [np.std(obs) / np.sqrt(len(obs)) for obs in L_data['observations']]
                 
-                # Raw data plot
-                axes[0].errorbar(p_values, means, yerr=errors,
+                # Raw data plot with error bars
+                axes[0].errorbar(p_values, means, yerr=stderrs,
                                marker='o', linestyle='-', color=colors[i],
-                               label=f'L = {L}')
+                               label=f'L = {L}', capsize=3)
                 
-                # Collapsed data plot using fitted parameters
+                # Collapsed data plot with error bars
                 x_scaled = (p_values - fitted_pc) * L**(1/fitted_nu)
                 y_scaled = np.array(means) * L**beta
-                errors_scaled = np.array(errors) * L**beta
+                yerr_scaled = np.array(stderrs) * L**beta
                 
-                axes[1].errorbar(x_scaled, y_scaled, yerr=errors_scaled,
-                               marker='o', linestyle='', color=colors[i],
-                               label=f'L = {L}')
+                # Sort points by x_scaled for proper line connection
+                sort_idx = np.argsort(x_scaled)
+                x_scaled = x_scaled[sort_idx]
+                y_scaled = y_scaled[sort_idx]
+                yerr_scaled = yerr_scaled[sort_idx]
+                
+                axes[1].errorbar(x_scaled, y_scaled, yerr=yerr_scaled,
+                               marker='o', linestyle='-', color=colors[i],
+                               label=f'L = {L}', capsize=3)
             
             # Add vertical line at p_c in raw data plot
             axes[0].axvline(x=fitted_pc, color='k', linestyle='--', alpha=0.7,
@@ -476,7 +499,32 @@ class TMIAnalyzer:
             axes[1].legend(loc='best')
             axes[1].grid(alpha=0.3)
             
+            # Add uncertainty band for p_c
+            pc_band_x = np.array([fitted_pc - fitted_pc_err, fitted_pc + fitted_pc_err])
+            pc_band_y = axes[0].get_ylim()
+            axes[0].fill_betweenx(pc_band_y, pc_band_x[0], pc_band_x[1], color='gray', alpha=0.2, label=f'p_c uncertainty')
+            
+            # Add uncertainty bands for the collapsed data
+            for i, L in enumerate(unique_L):
+                L_data = df.loc[(slice(None), L), :]
+                p_values = L_data.index.get_level_values('p')
+                means = [np.mean(obs) for obs in L_data['observations']]
+                
+                # Calculate x values for upper and lower bounds of uncertainty bands
+                x_scaled_low = (p_values - (fitted_pc + fitted_pc_err)) * L**(1/(fitted_nu + fitted_nu_err))
+                x_scaled_high = (p_values - (fitted_pc - fitted_pc_err)) * L**(1/(fitted_nu - fitted_nu_err))
+                y_scaled = np.array(means) * L**beta
+                
+                # Plot uncertainty band
+                x_band = np.vstack([x_scaled_low, x_scaled_high])
+                y_band = np.vstack([y_scaled, y_scaled])
+                axes[1].fill_between(x_band.mean(axis=0), y_band.min(axis=0), y_band.max(axis=0), 
+                                   color=colors[i], alpha=0.1)
+            
             plt.tight_layout()
+            
+            # Ensure output directory exists
+            os.makedirs(self.output_folder, exist_ok=True)
             
             # Save figure
             fig_path = os.path.join(
@@ -719,7 +767,7 @@ class TMIAnalyzer:
         
         return results
 
-    def plot_compare_loss_manifold(self, p_range, nu_range, n_points=100, L_min=12, 
+    def plot_compare_loss_manifold(self, p_range, nu_range=None, n_points=100, L_min=12, 
                                    implementations=None, figsize=(15, 6)):
         """
         Visualize and compare the loss function manifold for different implementations.
@@ -728,8 +776,8 @@ class TMIAnalyzer:
         -----------
         p_range : tuple
             (min_p, max_p) range to explore
-        nu_range : tuple
-            (min_nu, max_nu) range to explore
+        nu_range : tuple, optional
+            (min_nu, max_nu) range to explore. Default is (0.3, 1.5) if None
         n_points : int
             Number of points to sample in each dimension
         L_min : int
@@ -744,6 +792,20 @@ class TMIAnalyzer:
         tuple
             (fig, axes) tuple
         """
+        # Add default nu_range if None
+        if nu_range is None:
+            print("nu_range was None, using default range (0.3, 1.5)")
+            nu_range = (0.3, 1.5)
+        
+        # Convert string to tuple if necessary (e.g. from command line args)
+        if isinstance(nu_range, str):
+            try:
+                nu_range = eval(nu_range)
+                print(f"Converted string nu_range '{nu_range}' to tuple {nu_range}")
+            except:
+                print(f"Failed to convert string nu_range '{nu_range}', using default range")
+                nu_range = (0.3, 1.5)
+        
         if self.unscaled_df is None:
             print("No data available for analysis!")
             return None
@@ -809,12 +871,12 @@ class TMIAnalyzer:
 
                     # Add a horizontal line at nu = 1.5
                     axes[i][0].axhline(y=1.5, color='red', linestyle='--', alpha=0.7)
-                    axes[i][0].axhline(y=1.33, color='blue', linestyle='--', alpha=0.7)
-                    axes[i][0].axvline(x=0.5, color='green', linestyle='--', alpha=0.7)
+                    axes[i][0].axhline(y=self.nu_guess, color='blue', linestyle='--', alpha=0.7)
+                    axes[i][0].axvline(x=self.pc_guess, color='green', linestyle='--', alpha=0.7)
                     # Add legend for reference lines
                     axes[i][0].plot([], [], '--', color='red', label='$\\nu$ = 1.5')
-                    axes[i][0].plot([], [], '--', color='blue', label='$\\nu$ = 1.33')
-                    axes[i][0].plot([], [], '--', color='green', label='$p_c$ = 0.5')
+                    axes[i][0].plot([], [], '--', color='blue', label=f'$\\nu$ = {self.nu_guess:.3f}')
+                    axes[i][0].plot([], [], '--', color='green', label=f'$p_c$ = {self.pc_guess:.3f}')
                     axes[i][0].legend(loc='upper right', fontsize=8)
                 else:
                     # For linear spacing with custom step size
@@ -845,6 +907,9 @@ class TMIAnalyzer:
         
         plt.tight_layout()
         
+        # Ensure output directory exists
+        os.makedirs(self.output_folder, exist_ok=True)
+        
         # Save figure
         fig_path = os.path.join(
             self.output_folder,
@@ -855,7 +920,7 @@ class TMIAnalyzer:
         
         return fig, axes
     
-    def result(self, bootstrap=False, L_min=None, L_max=None, p_range=None, 
+    def result(self, bootstrap=False, L_min=None, L_max=None, p_range=None, nu_range=None,
                  implementations=None, nu_vary=True, p_c_vary=True):
         '''
         Output the results of the data collapse analysis:
@@ -866,14 +931,16 @@ class TMIAnalyzer:
         
         Parameters:
         -----------
-        bootstrap : bool
-            Whether to perform bootstrap analysis
+        bootstrap : bool or str
+            Whether to perform bootstrap analysis. Can be bool or str ('True'/'False')
         L_min : int, optional
             Minimum system size to include
         L_max : int, optional
             Maximum system size to include
         p_range : tuple, optional
             (min, max) range of p values to include
+        nu_range : tuple, optional
+            (min, max) range of nu values to include for loss manifold plots. Default is (0.3, 1.5)
         implementations : list, optional
             List of implementations to compare (default: all in df)
         nu_vary : bool
@@ -886,9 +953,34 @@ class TMIAnalyzer:
         dict
             Dictionary with implementation names as keys and results as values
         '''        
-        unscaled_df = self.read_from_csv()
-        if unscaled_df is None:
-            self.read_and_compute_from_h5(n=0)
+        # Convert string boolean to actual boolean if needed
+        if isinstance(bootstrap, str):
+            bootstrap = bootstrap.lower() == 'true'
+
+        # Ensure nu_range has a value
+        if nu_range is None:
+            nu_range = (0.3, 1.5)
+            print(f"nu_range was None, using default: {nu_range}")
+        elif isinstance(nu_range, str):
+            try:
+                nu_range = eval(nu_range)
+                print(f"Converted string nu_range to tuple: {nu_range}")
+            except:
+                print(f"Failed to convert string nu_range: {nu_range}, using default")
+                nu_range = (0.3, 1.5)
+
+        # Ensure data is loaded
+        if self.unscaled_df is None:
+            print("No data loaded yet, attempting to load from CSV...")
+            self.unscaled_df = self.read_from_csv()
+            
+            if self.unscaled_df is None:
+                print("No CSV data found, attempting to compute from H5 files...")
+                self.read_and_compute_from_h5(n=0)
+                
+                if self.unscaled_df is None:
+                    print("ERROR: Unable to load any data, cannot proceed with analysis.")
+                    return None
 
         # Get unique implementations if not specified
         if implementations is None:
@@ -905,7 +997,7 @@ class TMIAnalyzer:
         print("\nGenerating loss manifold plots...")
         fig_loss, axes_loss = self.plot_compare_loss_manifold(
             p_range=p_range,
-            nu_range=(0.7, 2.0),
+            nu_range=nu_range,
             n_points=50,
             L_min=L_min,
             implementations=implementations
@@ -916,10 +1008,13 @@ class TMIAnalyzer:
         
         # Perform data collapse analysis
         if bootstrap:
-            # Get bootstrap parameters from user
-            n_samples = int(input("Enter the number of bootstrap samples (default: 100): ") or 100)
-            sample_size = int(input("Enter the sample size (default: 1000): ") or 1000)
-            seed = int(input("Enter random seed for reproducibility (default: 42): ") or 42)
+            # # Get bootstrap parameters from user
+            # n_samples = int(input("Enter the number of bootstrap samples (default: 100): ") or 100)
+            # sample_size = int(input("Enter the sample size (default: 1000): ") or 1000)
+            # seed = int(input("Enter random seed for reproducibility (default: 42): ") or 42)
+            n_samples = 100
+            sample_size = 1000
+            seed = 42
             
             # Perform bootstrap data collapse analysis
             print("\nPerforming bootstrap data collapse analysis...")
@@ -982,28 +1077,34 @@ class TMIAnalyzer:
                 fitted_nu = res['nu_mean']
                 beta = 0  # Usually 0 for TMI
                 
-                # Plot raw and collapsed data
+                # Plot raw and collapsed data with error bars for each L
                 for i, L in enumerate(unique_L):
                     L_data = impl_df.loc[(slice(None), L), :]
                     p_values = L_data.index.get_level_values('p')
                     
-                    # Calculate statistics
+                    # Calculate mean and standard error for each point
                     means = [np.mean(obs) for obs in L_data['observations']]
-                    errors = [np.std(obs) / np.sqrt(len(obs)) for obs in L_data['observations']]
+                    stderrs = [np.std(obs) / np.sqrt(len(obs)) for obs in L_data['observations']]
                     
-                    # Raw data plot
-                    axes[0].errorbar(p_values, means, yerr=errors,
+                    # Raw data plot with error bars
+                    axes[0].errorbar(p_values, means, yerr=stderrs,
                                    marker='o', linestyle='-', color=colors[i],
-                                   label=f'L = {L}')
+                                   label=f'L = {L}', capsize=3)
                     
-                    # Collapsed data plot using bootstrap parameters
+                    # Collapsed data plot with error bars
                     x_scaled = (p_values - fitted_pc) * L**(1/fitted_nu)
                     y_scaled = np.array(means) * L**beta
-                    errors_scaled = np.array(errors) * L**beta
+                    yerr_scaled = np.array(stderrs) * L**beta
                     
-                    axes[1].errorbar(x_scaled, y_scaled, yerr=errors_scaled,
-                                   marker='o', linestyle='', color=colors[i],
-                                   label=f'L = {L}')
+                    # Sort points by x_scaled for proper line connection
+                    sort_idx = np.argsort(x_scaled)
+                    x_scaled = x_scaled[sort_idx]
+                    y_scaled = y_scaled[sort_idx]
+                    yerr_scaled = yerr_scaled[sort_idx]
+                    
+                    axes[1].errorbar(x_scaled, y_scaled, yerr=yerr_scaled,
+                                   marker='o', linestyle='-', color=colors[i],
+                                   label=f'L = {L}', capsize=3)
                 
                 # Add vertical line at p_c in raw data plot
                 axes[0].axvline(x=fitted_pc, color='k', linestyle='--', alpha=0.7,
@@ -1024,6 +1125,9 @@ class TMIAnalyzer:
                 axes[1].grid(alpha=0.3)
                 # Don't set fixed x-limits for the scaled plot - let matplotlib auto-scale
                 plt.tight_layout()
+                
+                # Ensure output directory exists
+                os.makedirs(self.output_folder, exist_ok=True)
                 
                 # Save figure
                 fig_path = os.path.join(
@@ -1080,6 +1184,9 @@ class TMIAnalyzer:
         if not results:
             return
             
+        # Ensure output directory exists
+        os.makedirs(self.output_folder, exist_ok=True)
+            
         # Prepare data for CSV
         csv_data = []
         for impl, res in results.items():
@@ -1116,6 +1223,134 @@ class TMIAnalyzer:
         print(f"Saved results to {csv_filename}")
 
 if __name__ == "__main__":
-    for threshold in np.logspace(-15, -10, 6):
-        analyzer = TMIAnalyzer(pc_guess=0.5, nu_guess=1.33, p_fixed=0.0, p_fixed_name='pctrl', threshold=threshold)
-        results = analyzer.result(bootstrap=False, L_min=12, L_max=20, p_range=(0.35, 0.65))
+    # First run the analysis for different thresholds if needed
+    run_analysis = False # Set to True to rerun the analysis
+    pc_guess = 0.5
+    delta_p = 0.1
+    p_range = (pc_guess - delta_p, pc_guess + delta_p)
+    nu_guess = 1.33
+    delta_nu = 0.5
+    nu_range = (nu_guess - delta_nu, nu_guess + delta_nu)
+    p_fixed = 0.0
+    p_fixed_name = 'pctrl'
+    import glob
+    folder = 'tmi_compare_results'
+    data_collapse_file_name = f'data_collapse_results_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
+    csv_file_name = f'tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
+    data_collapse_files = glob.glob(os.path.join(folder, data_collapse_file_name))
+    csv_files = glob.glob(os.path.join(folder, csv_file_name))
+    if run_analysis:
+        for file in csv_files:
+            print(f"Processing file: {file}")
+            threshold = float(file.split('threshold')[-1].split('.csv')[0].replace('e-', 'e-'))
+            analyzer = TMIAnalyzer(pc_guess, nu_guess, p_fixed, p_fixed_name, threshold)
+            results = analyzer.result(bootstrap=False, L_min=12, L_max=20, p_range=p_range, nu_range=nu_range)
+
+    # Initialize data structures
+    thresholds = []
+    pc_values = {'tao': [], 'haining': []}
+    pc_errors = {'tao': [], 'haining': []}
+    nu_values = {'tao': [], 'haining': []}
+    nu_errors = {'tao': [], 'haining': []}
+    
+    # Read data from each file and store with threshold
+    data = []
+    for file in data_collapse_files:
+        # Extract threshold from filename
+        threshold = float(file.split('threshold')[-1].split('.csv')[0].replace('e-', 'e-'))
+        df = pd.read_csv(file)
+        data.append((threshold, df))
+    
+    # Sort data by threshold
+    data.sort(key=lambda x: x[0])
+    
+    # Extract sorted data
+    for threshold, df in data:
+        thresholds.append(threshold)
+        for impl in ['tao', 'haining']:
+            impl_data = df[df['implementation'] == impl]
+            if not impl_data.empty:
+                pc_values[impl].append(impl_data['pc'].values[0])
+                pc_errors[impl].append(impl_data['pc_err'].values[0])
+                nu_values[impl].append(impl_data['nu'].values[0])
+                nu_errors[impl].append(impl_data['nu_err'].values[0])
+    
+    # Convert to numpy arrays
+    thresholds = np.array(thresholds)
+    for impl in ['tao', 'haining']:
+        pc_values[impl] = np.array(pc_values[impl])
+        pc_errors[impl] = np.array(pc_errors[impl])
+        nu_values[impl] = np.array(nu_values[impl])
+        nu_errors[impl] = np.array(nu_errors[impl])
+    
+    # Create separate figures for each implementation
+    for impl, color in zip(['tao', 'haining'], ['blue', 'red']):
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+        
+        # Plot pc vs threshold on left y-axis
+        ax1.errorbar(thresholds, pc_values[impl], yerr=pc_errors[impl],
+                    marker='o', linestyle='-', label='p_c',
+                    color='blue', capsize=3)
+        ax1.set_xlabel('Threshold')
+        ax1.set_ylabel('p_c', color='blue')
+        ax1.tick_params(axis='y', labelcolor='blue')
+        
+        # Set y-axis limits for pc (left axis)
+        pc_mean = np.mean(pc_values[impl])
+        pc_std = np.std(pc_values[impl])
+        ax1.set_ylim(pc_mean - 10*pc_std, pc_mean + 10*pc_std)
+        
+        # Create second y-axis for nu
+        ax2 = ax1.twinx()
+        ax2.errorbar(thresholds, nu_values[impl], yerr=nu_errors[impl],
+                    marker='s', linestyle='-', label='ν',
+                    color='red', capsize=3)
+        ax2.set_ylabel('ν', color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+        
+        # Set y-axis limits for nu (right axis)
+        nu_mean = np.mean(nu_values[impl])
+        nu_std = np.std(nu_values[impl])
+        ax2.set_ylim(nu_mean - 10*nu_std, nu_mean + 10*nu_std)
+        
+        # Set x-axis to log scale
+        ax1.set_xscale('log')
+        
+        # Add title
+        plt.title(f'{impl.capitalize()} Implementation: Critical Parameters vs Threshold')
+        
+        # Add grid (only for left y-axis to avoid cluttering)
+        ax1.grid(True, alpha=0.3)
+        
+        # Combine legends from both axes
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax2.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+        # Add horizontal line at pc_guess, nu_guess
+        ax1.axhline(pc_guess, color='b', linestyle='--', alpha=0.7)
+        ax2.axhline(nu_guess, color='r', linestyle='--', alpha=0.7)
+        
+        plt.tight_layout()
+        
+        # Save the figure
+        plt.savefig(f'tmi_compare_results/threshold_dependence_{impl}.png', dpi=300, bbox_inches='tight')
+        print(f"Saved threshold dependence plot for {impl} to tmi_compare_results/threshold_dependence_{impl}.png")
+    
+    # Print summary statistics
+    print("\nSummary Statistics:")
+    for impl in ['tao', 'haining']:
+        print(f"\n{impl.capitalize()} Implementation:")
+        print(f"p_c = {np.mean(pc_values[impl]):.5f} ± {np.std(pc_values[impl]):.5f} (std across thresholds)")
+        print(f"ν = {np.mean(nu_values[impl]):.5f} ± {np.std(nu_values[impl]):.5f} (std across thresholds)")
+        print(f"Threshold range: {min(thresholds):.1e} to {max(thresholds):.1e}")
+        
+        # Print values for each threshold
+        print(f"\nDetailed {impl.capitalize()} results:")
+        print("Threshold      p_c ± err        ν ± err")
+        print("-" * 45)
+        for t, pc, pc_e, nu, nu_e in zip(thresholds, pc_values[impl], pc_errors[impl], 
+                                        nu_values[impl], nu_errors[impl]):
+            print(f"{t:e}  {pc:.5f} ± {pc_e:.5f}  {nu:.5f} ± {nu_e:.5f}")
+
+        
