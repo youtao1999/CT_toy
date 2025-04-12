@@ -5,7 +5,7 @@
 # Default values (can be overridden by command line arguments)
 P_FIXED_NAME="pctrl"
 P_FIXED="0.0"
-P_RANGE="0.45:0.65:40"
+P_RANGE="0.4:0.6:40"
 TOTAL_SAMPLES=2000
 COMPARISON="--comparison"  # Empty string for no comparison
 

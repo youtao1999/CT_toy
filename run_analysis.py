@@ -11,11 +11,11 @@ p_fixed_name = "pctrl"
 bootstrap = False
 l_min = 12
 l_max = 20
-p_range = (0.35, 0.65)
+p_range = (0.4, 0.6)
 nu_range = (0.3, 1.5)
 threshold_min = -15
 threshold_max = -5
-threshold_steps = 80
+threshold_steps = 20
 output_folder = "tmi_compare_results"
 
 # Ensure output directory exists
