@@ -1,0 +1,25 @@
+Installing your own software
+Package management tools like yum or apt, which are used to install software in typical Linux systems, are not available to users of shared computing systems like Amarel. So, most packages need to be compiled from their source code and then installed. Further, most packages are generally configured to be installed in /usr or /opt, but these locations are inaccessible to (not writeable for) general users. Special care must be taken by users to ensure that the packages will be installed in their own /home directory (/home/<NetID>).
+As an example, here are the steps for installing ZIPPER, a generic example package that doesn’t actually exist:
+Download your software package. You can download a software package to your laptop, and then transfer the downloaded package to your /home directory on the cluster for installation. Alternatively, if you have the http or ftp address for the package, you can transfer that package directly to your /home directory while logged-in using the wget utility:   wget http://www.zippersimxl.org/public/zipper/zipper-4.1.5.tar.gz
+Unzip and unpack the .tar.gz (or .tgz) file. Most software packages are compressed in a .zip, .tar or .tar.gz file. You can use the tar utility to unpack the contents of these files:  tar -zxf zipper-4.1.5.tar.gz
+Read the instructions for installing. Several packages come with an INSTALL or README file with instructions for setting up that package. Many will also explicitly include instructions on how to do so on a system where you do not have root access. Alternatively, the installation instructions may be posted on the website from which you downloaded the software.
+Load the required software modules for installation. Software packages generally have dependencies, i.e., they require other software packages in order to be installed. The README or INSTALL file will generally list these dependencies. Often, you can use the available modules to satisfy these dependencies. But sometimes, you may also need to install the dependencies for yourself. Here, we load the dependencies for ZIPPER:
+module load intel/19.0.3 mvapich2/2.2
+Perform the installation. The next few steps vary widely but instructions almost always come with the downloaded source package. Guidance on the special arguments passed to the configure script is often available by running the ./configure --help command. What you see below is just a typical example of special options that might be specified.
+./configure --prefix=$HOME/zipper/4.1.5 --disable-float --enable-mpi --without-x
+make -j 4
+make install
+Several packages are set up in a similar way, i.e., using configure, then make, and make install. Note the options provided to the configure script. These differ from package to package, and are documented as part of the setup instructions, but the prefix option is almost always supported. It specifies where the package will be installed. Unless this special argument is provided, the package will generally be installed to a location such as /usr/local or /opt, but users do not have write-access to those directories. So, here, I'm installing software in my /home/<NetID>/zipper/4.1.5 directory. The following directories are created after installation:
+/home/[NetID]/zipper/4.1.5/bin,  where executables will be placed
+/home/[NetID]/zipper/4.1.5/lib,  where library files will be placed
+/home/[NetID]/zipper/4.1.5/include,  where header files will be placed
+/home/[NetID]/zipper/4.1.5/share/man,  where documentation will be placed
+Configure environment settings. The above bin, lib, include and share directories are generally not part of the shell environment, i.e., the shell and other programs don’t “know” about these directories. Therefore, the last step in the installation process is to add these directories to the shell environment:
+export PATH=/home/<NetID>/zipper/4.1.5/bin:$PATH
+export C_INCLUDE_PATH=/home/<NetID>/zipper/4.1.5/include:$C_INCLUDE_PATH
+export CPLUS_INCLUDE_PATH=/home/<NetID>/zipper/4.1.5/include:$CPLUS_INCLUDE_PATH
+export LIBRARY_PATH=/home/<NetID>/zipper/4.1.5/lib:$LIBRARY_PATH
+export LD_LIBRARY_PATH=/home/<NetID>/zipper/4.1.5/lib:$LD_LIBRARY_PATH
+export MANPATH=/home/<NetID>/zipper/4.1.5/share/man:$MANPATH
+These export commands are standalone commands that change the shell environment, but these new settings are only valid for the current shell session. Rather than executing these commands for every shell session, they can be added to the end of your ~/.bashrc file which will result in those commands being executed every time you log-in to the cluster.

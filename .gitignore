@@ -1,0 +1,38 @@
+# Data directories
+sv_*/
+tmi_*/
+apr7_8_files/
+__pycache__/
+
+# Data files
+*.h5
+*.hdf5
+
+# Log files
+*.log
+*.err
+*.out
+
+# Temporary files
+*.tmp
+*.temp
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Python cache
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
