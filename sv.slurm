@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=main           # Partition name
 #SBATCH --job-name=sv         # Job name
+#SBATCH --requeue
 #SBATCH --output=/scratch/ty296/logs/%j.out    # Output file with job ID
 #SBATCH --error=/scratch/ty296/logs/%j.err     # Error file with job ID
 #SBATCH --time=20:00:00            # Time limit (20 hours)
