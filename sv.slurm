@@ -37,4 +37,4 @@ export OPENBLAS_NUM_THREADS=1
 # Run the MPI program
 srun --mpi=pmix python3 /scratch/ty296/CT_toy/sv.py --L $L --p_fixed_name $p_fixed_name --p_fixed $p_fixed --ncpu $NCPU --p_range $p_range --total_samples $total_samples 
 
-# srun --mpi=pmix python3 sv.py --L 12 --p_fixed_name "p_ctrl" --p_fixed 0.0 --ncpu 1 --p_range 0.0:1.0:2 --total_samples 2
+# srun --mpi=pmix python3 /scratch/ty296/CT_toy/sv.py --L 12 --p_fixed_name p_ctrl --p_fixed 0.0 --ncpu 1 --p_range "0.0:1.0:2" --total_samples 2
