@@ -14,6 +14,7 @@ import os
 import h5py
 import argparse
 from mpi4py import MPI
+from tqdm import tqdm
 
 
 class SingularValueComputer:
@@ -70,7 +71,7 @@ class SingularValueComputer:
                 
                 # Run Tao's implementation
                 qct_tao = qct.QCT(self.L, p_ctrl, p_proj)
-                for _ in range(self.num_time_steps):
+                for _ in tqdm(range(self.num_time_steps)):
                     qct_tao.step_evolution()
                 _, singular_values = tripartite_mutual_information(
                     qct_tao.state, self.L, n=0, return_singular_values=True)
@@ -476,3 +477,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # p_scan_values = np.array([0.4])  # or use np.linspace(0.0, 1.0, 2)
+
+    # sv_computer = SingularValueComputer(L=24, p_fixed=0.4, p_fixed_name="p_ctrl", p_scan_values=p_scan_values, chunk_size=1, comparison=False)
+    # result = sv_computer.compute_chunk()
+    # print(f"Result keys: {result.keys()}")
+    # print(f"Singular values keys: {result['singular_values'].keys()}")
+    # print(f"Singular values: {np.shape(result['singular_values']['AB'])}")
