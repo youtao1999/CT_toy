@@ -9,17 +9,14 @@
 #SBATCH --cpus-per-task=1          # Ensure one CPU per task
 #SBATCH --ntasks=5                 # Number of MPI tasks
 
-# Email notifications
-#SBATCH --mail-user=ty296@physics.rutgers.edu
-#SBATCH --mail-type=END,FAIL       # Send email when job ends or fails
 
-# Set parameters from command line arguments
-L=$1
-p_fixed_name=$2
-p_fixed=$3
-p_range=$4
-total_samples=$5
-NCPU=$SLURM_NTASKS
+# # Set parameters from command line arguments
+# L=$1
+# p_fixed_name=$2
+# p_fixed=$3
+# p_range=$4
+# total_samples=$5
+# NCPU=$SLURM_NTASKS
 
 # Unload all modules
 module purge
