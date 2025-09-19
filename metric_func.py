@@ -83,7 +83,7 @@ def von_Neumann_entropy_pure(vec, subregion, L_T, n=1, threshold=1e-10, return_s
         return entropy, S_pos
     return entropy
 
-def half_system_entanglement_entropy(vec, L, selfaverage=True, n=1, threshold=1e-10):
+def half_system_entanglement_entropy(vec, L, selfaverage=True, n=1, threshold=1e-10, return_singular_values=False):
     """Calculate the half-system entanglement entropy for a given state vector.
 
     Parameters
@@ -105,9 +105,9 @@ def half_system_entanglement_entropy(vec, L, selfaverage=True, n=1, threshold=1e
         Half-system entanglement entropy
     """
     if selfaverage:
-        return np.mean([von_Neumann_entropy_pure(vec, np.arange(i, i+L//2), L, n, threshold) for i in range(L//2)])
+        return np.mean([von_Neumann_entropy_pure(vec, np.arange(i, i+L//2), L, n, threshold, return_singular_values=return_singular_values) for i in range(L//2)])
     else:
-        return von_Neumann_entropy_pure(vec, np.arange(L//2), L, n, threshold)
+        return von_Neumann_entropy_pure(vec, np.arange(L//2), L, n, threshold, return_singular_values=return_singular_values)
 
 def calculate_afm_neel_order(state, L):
     """

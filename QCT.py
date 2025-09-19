@@ -1,11 +1,11 @@
 import numpy as np
 from fractions import Fraction
-from QCT_util import Haar_state, dec2bin, U
+from QCT_util import Haar_state, dec2bin, U, U_simp
 from functools import partial
 import scipy.sparse as sp   
 
 class QCT():
-    def __init__(self, L, p_ctrl, p_proj, seed_initial=None, seed_ctrl=None, seed_proj=None, seed_born=None, seed_scramble=None):
+    def __init__(self, L, p_ctrl, p_proj, seed_initial=None, seed_ctrl=None, seed_proj=None, seed_born=None, seed_scramble=None, U_simp_var=False, theta=None):
         self.L = L
         self.p_ctrl = p_ctrl
         self.p_proj = p_proj
@@ -13,6 +13,11 @@ class QCT():
         self.seed_proj = seed_proj
         self.seed_born = seed_born
         self.seed_scramble = seed_scramble
+        self.U_simp_var = U_simp_var
+        if self.U_simp_var:
+            assert theta is not None and len(theta) == 12, "theta is required when U_simp_var is True"
+            # theta is a list of 12 floats
+            self.theta = theta
         self.state = Haar_state(self.L, 1, rng=np.random.default_rng(seed_initial), k=1).flatten()
 
     def XL_tensor(self, state):
@@ -97,7 +102,7 @@ class QCT():
         numpy.array, 
             state vector after applying scrambler gate
         """
-        U_4=U(4,rng=rng)
+        U_4=U(4,rng=rng) if not self.U_simp_var else U_simp(False, rng=rng, theta=self.theta)
         vec=vec.reshape((2**(self.L-2),2**2)).T
         return (U_4@vec).T
     
