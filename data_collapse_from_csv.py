@@ -290,11 +290,11 @@ if __name__ == "__main__":
     result = perform_data_collapse_analysis(
         csv_file=csv_file,
         pc_guess=0.75,      # Initial guess for critical point
-        nu_guess=1.0,       # Initial guess for correlation length exponent
+        nu_guess=0.67,       # Initial guess for correlation length exponent
         beta=0,             # Scaling dimension (0 for TMI)
         L_min=None,         # Include all L values (8, 12, 16, 20)
         L_max=None,
-        p_range=None,       # Include all pproj values (0.5 to 1.0)
+        p_range=[0.65, 0.85],       # Include all pproj values (0.5 to 1.0)
         nu_vary=True,       # Fit nu
         p_c_vary=True,      # Fit p_c
         n_samples=100,      # Number of synthetic samples from mean/sem

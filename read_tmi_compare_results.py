@@ -1225,18 +1225,18 @@ class TMIAnalyzer:
 if __name__ == "__main__":
     # First run the analysis for different thresholds if needed
     run_analysis = False # Set to True to rerun the analysis
-    pc_guess = 0.5
-    delta_p = 0.1
+    pc_guess = 0.75
+    delta_p = 0.2
     p_range = (pc_guess - delta_p, pc_guess + delta_p)
-    nu_guess = 1.33
-    delta_nu = 0.5
+    nu_guess = 0.67
+    delta_nu = 0.2
     nu_range = (nu_guess - delta_nu, nu_guess + delta_nu)
-    p_fixed = 0.0
+    p_fixed = 0.4
     p_fixed_name = 'pctrl'
     import glob
-    folder = 'tmi_compare_results'
+    folder = '/scratch/ty296/tmi_compare_results'
     data_collapse_file_name = f'data_collapse_results_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
-    csv_file_name = f'tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
+    csv_file_name = f'/scratch/ty296/plots/tmi_compare_results_{p_fixed_name}{p_fixed:.3f}_threshold*.csv'
     data_collapse_files = glob.glob(os.path.join(folder, data_collapse_file_name))
     csv_files = glob.glob(os.path.join(folder, csv_file_name))
     if run_analysis:
