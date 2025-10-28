@@ -57,60 +57,110 @@ if __name__ == "__main__":
     for csv_file in csv_files:
         print(f"  - {csv_file}")
     
-    # Step 2: Create plots from CSV files
+    # Step 2: Create combined plot from all CSV files
     print("\n" + "="*60)
-    print("Step 2: Creating plots from CSV files...")
+    print("Step 2: Creating combined plot from all CSV files...")
     print("="*60)
     
+    # Organize data by L and threshold
+    import re
+    plot_data = {}  # {L: {threshold: data_dict}}
+    
     for csv_file in csv_files:
-        print(f"\nProcessing: {csv_file}")
+        print(f"\nLoading: {csv_file}")
         df = pd.read_csv(csv_file)
         
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-        
-        # Get unique L values
-        L_vals = sorted(df['L'].unique())
-        colors = sns.color_palette("Blues", n_colors=len(L_vals)+2)[2:]
-        
-        # Plot mean ± SEM
-        for idx, L in enumerate(L_vals):
-            L_data = df[df['L'] == L].sort_values('pproj')
-            ax1.errorbar(L_data['pproj'], L_data[f'{metric}_mean'], 
-                        yerr=L_data[f'{metric}_sem'],
-                        fmt='o-', capsize=3, label=f'L={L}', 
-                        color=colors[idx], alpha=0.8, markersize=5)
-        
-        ax1.set_xlabel('pproj', fontsize=12)
-        ax1.set_ylabel(f'{metric} Mean ± SEM', fontsize=12)
-        ax1.set_title(f'{metric} vs pproj (combined data, {researcher})', fontsize=13)
-        ax1.legend(fontsize=11, loc='best')
-        ax1.grid(True, alpha=0.3)
-        
-        # Plot variance ± SEV
-        for idx, L in enumerate(L_vals):
-            L_data = df[df['L'] == L].sort_values('pproj')
-            ax2.errorbar(L_data['pproj'], L_data[f'{metric}_variance'], 
-                        yerr=L_data[f'{metric}_sev'],
-                        fmt='s-', capsize=3, label=f'L={L}', 
-                        color=colors[idx], alpha=0.8, markersize=5)
-        
-        ax2.set_xlabel('pproj', fontsize=12)
-        ax2.set_ylabel(f'{metric} Variance ± SEV', fontsize=12)
-        ax2.set_title(f'{metric} Variance vs pproj (combined data, {researcher})', fontsize=13)
-        ax2.legend(fontsize=11, loc='best')
-        ax2.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        # Extract threshold from filename and save plot
-        import re
+        # Extract threshold from filename
         threshold_match = re.search(r'threshold([\d\.e\-\+]+)', csv_file)
-        if threshold_match:
-            threshold_str = threshold_match.group(1)
-            output_file = f'{save_folder}/{metric}_combined_plot_threshold{threshold_str}_{researcher}.png'
-            plt.savefig(output_file, dpi=300, bbox_inches='tight')
-            print(f"  Saved plot: {output_file}")
-            plt.close()
+        if not threshold_match:
+            print(f"  Warning: Could not extract threshold from {csv_file}")
+            continue
+        
+        threshold_str = threshold_match.group(1)
+        try:
+            threshold_val = float(threshold_str)
+        except ValueError:
+            print(f"  Warning: Could not parse threshold value: {threshold_str}")
+            continue
+        
+        # Store data for each L value
+        for L in L_values:
+            if L not in plot_data:
+                plot_data[L] = {}
+            
+            L_data = df[df['L'] == L].sort_values('pproj')
+            
+            if len(L_data) == 0:
+                continue
+            
+            plot_data[L][threshold_val] = {
+                'pproj': L_data['pproj'].values,
+                'mean': L_data[f'{metric}_mean'].values,
+                'sem': L_data[f'{metric}_sem'].values,
+                'variance': L_data[f'{metric}_variance'].values,
+                'sev': L_data[f'{metric}_sev'].values
+            }
+    
+    # Create combined plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Color palettes for different L values
+    color_palettes = ["Blues", "Greens", "Reds", "Purples", "Oranges", "Greys"]
+    
+    # Sort threshold values for consistent ordering
+    sorted_thresholds = sorted(threshold_values)
+    n_thresholds = len(sorted_thresholds)
+    
+    # Plot for each L value
+    for L_idx, L in enumerate(L_values):
+        if L not in plot_data or len(plot_data[L]) == 0:
+            print(f"Warning: No data found for L={L}")
+            continue
+        
+        # Use different color palette for each L
+        palette_name = color_palettes[L_idx % len(color_palettes)]
+        colors = sns.color_palette(palette_name, n_colors=n_thresholds+2)[1:]  # Skip lightest shade
+        
+        # Plot for each threshold
+        for i, threshold in enumerate(sorted_thresholds):
+            if threshold not in plot_data[L]:
+                print(f"Warning: threshold {threshold} not found for L={L}")
+                continue
+            
+            data = plot_data[L][threshold]
+            
+            # Plot mean ± SEM
+            ax1.errorbar(data['pproj'], data['mean'], yerr=data['sem'], 
+                        label=f'L={L}, threshold={threshold:.1e}', marker='o', capsize=3, 
+                        color=colors[n_thresholds-1-i], alpha=0.8, markersize=5)
+            
+            # Plot variance ± SEV
+            ax2.errorbar(data['pproj'], data['variance'], yerr=data['sev'],
+                        label=f'L={L}, threshold={threshold:.1e}', marker='s', capsize=3, 
+                        color=colors[n_thresholds-1-i], alpha=0.8, markersize=5)
+    
+    # Format axes
+    pctrl_str = f"{min(pctrl_range):.1f}-{max(pctrl_range):.1f}"
+    
+    ax1.set_xlabel('pproj', fontsize=12)
+    ax1.set_ylabel(f'{metric} Mean ± SEM', fontsize=12)
+    ax1.set_title(f'{metric} Mean vs pproj (pctrl={pctrl_str}, n={n}, {researcher})', fontsize=13)
+    # ax1.legend(fontsize=9, loc='best')
+    ax1.grid(True, alpha=0.3)
+    
+    ax2.set_xlabel('pproj', fontsize=12)
+    ax2.set_ylabel(f'{metric} Variance ± SEV', fontsize=12)
+    ax2.set_title(f'{metric} Variance vs pproj (pctrl={pctrl_str}, n={n}, {researcher})', fontsize=13)
+    ax2.legend(fontsize=9, bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save combined plot
+    L_str = '_'.join(map(str, L_values))
+    output_file = f'{save_folder}/{metric}_combined_threshold_comparison_L{L_str}_pc{pctrl_str}_n{n}_{researcher}.png'
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"\nCombined plot saved to: {output_file}")
     
     print("\n" + "="*60)
     print("Complete!")
