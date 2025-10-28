@@ -108,6 +108,111 @@ def load_tmi_data(filename, L, n=0, threshold=1e-15, metric = "I"):
         
         return pproj_values, metric_means, metric_sems, metric_variances, metric_sevs, pctrl_value, metric
 
+def load_from_combined_file(combined_file, L, pctrl_range, n=0, threshold=1e-15, metric="I", researcher='haining'):
+    """
+    Load TMI/entropy data from combined HDF5 file for a given L value.
+    
+    Args:
+        combined_file: Path to combined HDF5 file (e.g., 'pctrl0.4_combined.h5')
+        L: System size
+        pctrl_range: List or tuple of pctrl values to include (e.g., [0.6, 0.8])
+        n: Rényi index for entropy
+        threshold: Threshold for singular values
+        metric: 'I' for TMI or 'S' for entropy
+        researcher: 'haining' or 'tao' (which dataset to use)
+    
+    Returns:
+        pproj_values, metric_means, metric_sems, metric_variances, metric_sevs, pctrl_value, metric
+    """
+    print(f"Reading L={L} from combined file: {combined_file}")
+    print(f"  Using {researcher}'s data")
+    
+    all_pproj = []
+    all_metric_values = []  # Will store all samples across all pctrl values
+    
+    with h5py.File(combined_file, 'r') as f:
+        # First pass: count total iterations for progress bar
+        total_pproj = 0
+        valid_keys = []
+        for pctrl_val in pctrl_range:
+            key = f'L{L}_pc{pctrl_val:.3f}'
+            if key in f:
+                valid_keys.append((pctrl_val, key))
+                total_pproj += len(f[key]['pproj'][:])
+            else:
+                print(f"  Warning: {key} not found in file")
+        
+        # Second pass: process data with overall progress bar
+        pbar = tqdm(total=total_pproj, desc=f"  L={L} {metric}", unit="pproj")
+        
+        for pctrl_val, key in valid_keys:
+            # Get pproj values
+            pproj_values = f[key]['pproj'][:]
+            
+            # Get singular values from researcher's group
+            sv_group = f[key][researcher]['singular_values']
+            
+            num_pproj = len(pproj_values)
+            num_samples = sv_group['A'].shape[1]
+            
+            pbar.set_postfix({'pctrl': f'{pctrl_val:.3f}', 'samples': num_samples})
+            
+            # Compute TMI for each pproj and sample
+            for pproj_idx in range(num_pproj):
+                sample_metric_values = []
+                for sample_idx in range(num_samples):
+                    singular_values = {
+                        key_name: sv_group[key_name][pproj_idx, sample_idx] 
+                        for key_name in sv_group.keys()
+                    }
+                    if metric == "I":
+                        metric_value = compute_tmi_from_singular_values(singular_values, n, threshold)
+                    elif metric == "S":
+                        metric_value = compute_entropy_from_singular_values(singular_values['AB'], n, threshold)
+                    sample_metric_values.append(metric_value)
+                
+                all_pproj.append(pproj_values[pproj_idx])
+                all_metric_values.append(sample_metric_values)
+                pbar.update(1)
+        
+        pbar.close()
+    
+    # Compute statistics for each unique pproj value
+    print(f"  Computing statistics for {len(all_pproj)} pproj values...")
+    all_pproj = np.array(all_pproj)
+    
+    # Sort by pproj
+    sort_idx = np.argsort(all_pproj)
+    all_pproj = all_pproj[sort_idx]
+    all_metric_values = [all_metric_values[i] for i in sort_idx]
+    
+    # Compute mean, sem, variance, sev for each pproj
+    metric_means = []
+    metric_sems = []
+    metric_variances = []
+    metric_sevs = []
+    
+    for sample_values in tqdm(all_metric_values, desc=f"  Computing stats", unit="pproj"):
+        mean, sem = calculate_mean_and_error(sample_values)
+        metric_means.append(mean)
+        metric_sems.append(sem)
+        
+        variance, sev = calculate_variance_and_error(sample_values)
+        metric_variances.append(variance)
+        metric_sevs.append(sev)
+    
+    metric_means = np.array(metric_means)
+    metric_sems = np.array(metric_sems)
+    metric_variances = np.array(metric_variances)
+    metric_sevs = np.array(metric_sevs)
+    
+    # Use average pctrl for return value
+    pctrl_avg = np.mean(pctrl_range)
+    
+    print(f"  ✓ Completed L={L}")
+    
+    return all_pproj, metric_means, metric_sems, metric_variances, metric_sevs, pctrl_avg, metric
+
 def generate_csv_data(L_values=[8, 12, 16, 20], pctrl=0.4, n=0, threshold=1e-15, metric="I", force_recompute=False, save_folder='/scratch/ty296/plots'):
     """
     Generate CSV file with metric data for given parameters.
@@ -222,6 +327,119 @@ def batch_generate_csv(L_values=[8, 12, 16, 20], pctrl=0.4, n=0, threshold_value
     
     return csv_files
 
+def generate_csv_from_combined(combined_file, L_values=[8, 12, 16, 20], pctrl_range=[0.6, 0.8], n=0, threshold=1e-15, metric="I", researcher='haining', force_recompute=False, save_folder='/scratch/ty296/plots'):
+    """
+    Generate CSV file from combined HDF5 file.
+    
+    Args:
+        combined_file: Path to combined HDF5 file
+        L_values: List of system sizes to process
+        pctrl_range: List of pctrl values in the combined file (e.g., [0.6, 0.8])
+        n: Rényi index for entropy
+        threshold: Threshold for singular values
+        metric: Metric to compute ('I' for TMI, 'S' for entropy)
+        researcher: 'haining' or 'tao' (which dataset to use)
+        force_recompute: If True, recompute even if CSV exists
+        save_folder: Directory to save CSV files
+    
+    Returns:
+        Path to generated CSV file
+    """
+    # Generate CSV filename
+    pctrl_str = f"{min(pctrl_range):.1f}-{max(pctrl_range):.1f}"
+    csv_filename = os.path.join(save_folder, f'{metric}_data_combined_L{"-".join(map(str, L_values))}_pc{pctrl_str}_n{n}_threshold{threshold:.0e}_{researcher}.csv')
+    
+    # Check if file exists
+    if os.path.exists(csv_filename) and not force_recompute:
+        print(f"\nCSV already exists: {csv_filename}")
+        print(f"  Use force_recompute=True to regenerate")
+        return csv_filename
+    
+    print(f"\nGenerating {metric} data from combined file: {combined_file}")
+    print(f"Processing {len(L_values)} system sizes with threshold={threshold:.1e}...")
+    print(f"pctrl range: {pctrl_range}, researcher: {researcher}\n")
+    
+    # List to store all data for CSV
+    csv_data = []
+    for L in tqdm(L_values, desc="Overall Progress", unit="L"):
+        pproj, metric_mean, metric_sem, metric_variance, metric_sev, pctrl_avg, _ = load_from_combined_file(
+            combined_file, L, pctrl_range, n, threshold, metric, researcher
+        )
+        
+        # Add data to CSV list
+        for p, tm, ts, tv, tsev in zip(pproj, metric_mean, metric_sem, metric_variance, metric_sev):
+            csv_data.append({
+                'L': L,
+                'pctrl': pctrl_avg,
+                'pproj': p,
+                f'{metric}_mean': tm,
+                f'{metric}_sem': ts,
+                f'{metric}_variance': tv,
+                f'{metric}_sev': tsev
+            })
+        
+        print()  # Add blank line after each L
+    
+    # Save to CSV
+    if csv_data:
+        df = pd.DataFrame(csv_data)
+        df.to_csv(csv_filename, index=False)
+        print(f"\nSaved {metric} data to: {csv_filename}")
+        print(f"  Total data points: {len(csv_data)}")
+    else:
+        print("\nWarning: No data to save!")
+        return None
+    
+    return csv_filename
+
+def batch_generate_csv_from_combined(combined_file, L_values=[8, 12, 16, 20], pctrl_range=[0.6, 0.8], n=0, threshold_values=None, metric="I", researcher='haining', force_recompute=False, save_folder='/scratch/ty296/plots'):
+    """
+    Generate CSV files from combined HDF5 file for multiple threshold values.
+    
+    Args:
+        combined_file: Path to combined HDF5 file
+        L_values: List of system sizes to process
+        pctrl_range: List of pctrl values in combined file
+        n: Rényi index for entropy
+        threshold_values: List of threshold values to process
+        metric: Metric to compute ('I' for TMI, 'S' for entropy)
+        researcher: 'haining' or 'tao' (which dataset to use)
+        force_recompute: If True, recompute even if CSV exists
+        save_folder: Directory to save CSV files
+    
+    Returns:
+        List of generated CSV file paths
+    """
+    if threshold_values is None:
+        threshold_values = [1e-15]
+    
+    csv_files = []
+    for threshold in threshold_values:
+        print(f"\n{'='*60}")
+        print(f"Processing threshold = {threshold:.1e}")
+        print(f"{'='*60}")
+        
+        csv_file = generate_csv_from_combined(
+            combined_file=combined_file,
+            L_values=L_values,
+            pctrl_range=pctrl_range,
+            n=n,
+            threshold=threshold,
+            metric=metric,
+            researcher=researcher,
+            force_recompute=force_recompute,
+            save_folder=save_folder
+        )
+        
+        if csv_file:
+            csv_files.append(csv_file)
+    
+    print(f"\n{'='*60}")
+    print(f"Generated {len(csv_files)} CSV files")
+    print(f"{'='*60}")
+    
+    return csv_files
+
 def fixed_L_threshold_comparison_plot(save_folder: str, L_list: list, n: int, pctrl: float, metric: str, threshold_values: list):
     """
     Plot the comparison of the metric for different thresholds and multiple L values.
@@ -260,10 +478,15 @@ def fixed_L_threshold_comparison_plot(save_folder: str, L_list: list, n: int, pc
                 continue
                 
             # Extract threshold from csv_path filename
-            threshold_match = re.search(r'threshold([\d\.e\-\+]+)', csv_path)
+            # Match pattern like "threshold1e-15" but not the .csv extension
+            threshold_match = re.search(r'threshold([\d\.e\-\+]+?)(?:\.csv|_)', csv_path)
             if threshold_match:
                 threshold_str = threshold_match.group(1)
-                threshold_val = float(threshold_str)
+                try:
+                    threshold_val = float(threshold_str)
+                except ValueError:
+                    print(f"Warning: Could not parse threshold from {csv_path}")
+                    continue
             else:
                 continue
             
@@ -318,7 +541,7 @@ def fixed_L_threshold_comparison_plot(save_folder: str, L_list: list, n: int, pc
     ax1.set_xlabel('pproj', fontsize=12)
     ax1.set_ylabel(f'{metric} Mean ± SEM', fontsize=12)
     ax1.set_title(f'{metric} Mean vs pproj (pctrl={pctrl:.3f}, n={n})', fontsize=13)
-    ax1.legend(fontsize=9, loc='best')
+    # ax1.legend(fontsize=9, loc='best')
     ax1.grid(True, alpha=0.3)
 
     ax2.set_xlabel('pproj', fontsize=12)
@@ -355,7 +578,7 @@ if __name__ == "__main__":
         n=n,
         threshold_values=threshold_values,
         metric=metric,
-        force_recompute=True,  # Set to False to skip existing files
+        force_recompute=False,  # Set to False to skip existing files
         save_folder=save_folder
     )
     

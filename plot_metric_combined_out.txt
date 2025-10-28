@@ -1,0 +1,60 @@
+nohup: ignoring input
+============================================================
+Processing Combined HDF5 File
+============================================================
+Input file: /scratch/ty296/CT_toy/pctrl0.4_combined.h5
+L values: [8, 12, 16, 20]
+pctrl range: [0.6, 0.8]
+Metric: S
+Researcher dataset: haining
+Thresholds: 6 values
+============================================================
+
+Step 1: Generating CSV files from combined HDF5...
+
+============================================================
+Processing threshold = 1.0e-15
+============================================================
+
+Generating S data from combined file: /scratch/ty296/CT_toy/pctrl0.4_combined.h5
+Processing 4 system sizes with threshold=1.0e-15...
+pctrl range: [0.6, 0.8], researcher: haining
+
+Overall Progress:   0%|          | 0/4 [00:00<?, ?L/s]Reading L=8 from combined file: /scratch/ty296/CT_toy/pctrl0.4_combined.h5
+  Using haining's data
+
+  L=8 S:   0%|          | 0/80 [00:00<?, ?pproj/s][A
+  L=8 S:   0%|          | 0/80 [00:00<?, ?pproj/s, pctrl=0.600, samples=2000][A
+  L=8 S:   1%|▏         | 1/80 [00:03<04:09,  3.16s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:   2%|▎         | 2/80 [00:06<04:07,  3.18s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:   4%|▍         | 3/80 [00:09<04:01,  3.14s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:   5%|▌         | 4/80 [00:12<03:56,  3.12s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:   6%|▋         | 5/80 [00:15<03:55,  3.14s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:   8%|▊         | 6/80 [00:18<03:52,  3.14s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:   9%|▉         | 7/80 [00:21<03:47,  3.12s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  10%|█         | 8/80 [00:25<03:45,  3.14s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  11%|█▏        | 9/80 [00:28<03:46,  3.19s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  12%|█▎        | 10/80 [00:31<03:42,  3.18s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  14%|█▍        | 11/80 [00:34<03:42,  3.23s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  15%|█▌        | 12/80 [00:38<03:41,  3.26s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  16%|█▋        | 13/80 [00:41<03:39,  3.28s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  18%|█▊        | 14/80 [00:45<03:43,  3.39s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  19%|█▉        | 15/80 [00:48<03:41,  3.40s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  20%|██        | 16/80 [00:52<03:42,  3.48s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  21%|██▏       | 17/80 [00:55<03:37,  3.45s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  22%|██▎       | 18/80 [00:59<03:33,  3.44s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  24%|██▍       | 19/80 [01:02<03:27,  3.40s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  25%|██▌       | 20/80 [01:05<03:22,  3.38s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  26%|██▋       | 21/80 [01:09<03:21,  3.42s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  28%|██▊       | 22/80 [01:12<03:16,  3.40s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  29%|██▉       | 23/80 [01:16<03:14,  3.41s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  30%|███       | 24/80 [01:19<03:09,  3.39s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  31%|███▏      | 25/80 [01:22<03:05,  3.37s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  32%|███▎      | 26/80 [01:26<03:01,  3.36s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  34%|███▍      | 27/80 [01:29<02:57,  3.36s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  35%|███▌      | 28/80 [01:32<02:52,  3.32s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  36%|███▋      | 29/80 [01:36<02:59,  3.52s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  38%|███▊      | 30/80 [01:40<03:08,  3.77s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  39%|███▉      | 31/80 [01:45<03:13,  3.95s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  40%|████      | 32/80 [01:49<03:12,  4.01s/pproj, pctrl=0.600, samples=2000][A
+  L=8 S:  41%|████▏     | 33/80 [01:53<03:11,  4.07s/pproj, pctrl=0.600, samples=2000][A
